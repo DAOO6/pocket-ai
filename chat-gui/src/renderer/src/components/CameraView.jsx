@@ -8,9 +8,13 @@ import { API_BASE_URL, WS_BASE_URL } from '../config.js';
 const pendingStopTimeoutRef = { current: null };
 const STOP_DELAY_MS = 500;
 
-// Stream image size after backend rotate + resize (camera_stream.py)
-const STREAM_IMAGE_WIDTH = 480;
-const STREAM_IMAGE_HEIGHT = 800;
+// Stream image size (camera_stream.py).
+// On Windows the webcam feed is landscape 640×384 with NO rotation applied.
+// On Pi the feed is rotated + resized to portrait 480×800.
+// We detect Windows by checking if the stream aspect ratio is landscape.
+// To keep this simple we just hardcode Windows dimensions here.
+const STREAM_IMAGE_WIDTH = 640;
+const STREAM_IMAGE_HEIGHT = 384;
 const STREAM_ASPECT = STREAM_IMAGE_WIDTH / STREAM_IMAGE_HEIGHT;
 
 export default function CameraView() {
@@ -230,13 +234,9 @@ export default function CameraView() {
         if (cw < 10 || ch < 10) return null; // wait for container measure
 
         return detections.map((det, index) => {
-            // Original bbox: normalized in 640×384 (unrotated) as [xmin, ymin, xmax, ymax]
-            const [oxMin, oyMin, oxMax, oyMax] = det.bbox;
-            // OpenCV ROTATE_90_CLOCKWISE: (x,y) -> (1-y, x) in normalized; so stream coords:
-            const sxMin = 1 - oyMax;
-            const syMin = oxMin;
-            const sxMax = 1 - oyMin;
-            const syMax = oxMax;
+            // bbox is normalized [xmin, ymin, xmax, ymax] in the 640×384 webcam frame.
+            // No rotation is applied on Windows so we use the coords directly.
+            const [sxMin, syMin, sxMax, syMax] = det.bbox;
 
             // Map from stream-image normalized to container normalized (object-cover)
             const tl = imageNormToContainerNorm(sxMin, syMin);

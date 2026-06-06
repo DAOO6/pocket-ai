@@ -497,11 +497,23 @@ async def get_stats():
 # Camera endpoints
 # ---------------------------------------------------------------------------
 
+def _flush_queue(q):
+    """Drain all items from a multiprocessing Queue without blocking."""
+    try:
+        while True:
+            q.get_nowait()
+    except Exception:
+        pass
+
+
 @router.post("/camera/start")
 async def start_camera():
     global camera_process, stop_event
     if camera_process and camera_process.is_alive():
         return {"status": "already_running"}
+    # Flush stale frames from previous session before starting
+    _flush_queue(stream_queue)
+    _flush_queue(detection_queue)
     stop_event.clear()
     camera_process = multiprocessing.Process(
         target=run_stream_process,
@@ -520,6 +532,9 @@ async def stop_camera():
         if camera_process.is_alive():
             camera_process.terminate()
         camera_process = None
+    # Flush queues so next start gets a clean slate
+    _flush_queue(stream_queue)
+    _flush_queue(detection_queue)
     return {"status": "stopped"}
 
 
@@ -580,16 +595,27 @@ async def start_detection():
     global _detection_loop, _detection_worker_thread
     detection_enabled.value = True
     _detection_loop = asyncio.get_running_loop()
-    if _detection_worker_thread is None or not _detection_worker_thread.is_alive():
-        _detection_worker_stop.clear()
-        _detection_worker_thread = threading.Thread(target=_run_detection_worker, daemon=True)
-        _detection_worker_thread.start()
+    # Always spawn a fresh worker — stop any existing one first
+    if _detection_worker_thread is not None and _detection_worker_thread.is_alive():
+        _detection_worker_stop.set()
+        _detection_worker_thread.join(timeout=3)
+    _detection_worker_stop.clear()
+    _detection_worker_thread = threading.Thread(target=_run_detection_worker, daemon=True)
+    _detection_worker_thread.start()
     return {"status": "started"}
 
 
 @router.post("/camera/detection/stop")
 async def stop_detection():
+    global _detection_worker_thread
     detection_enabled.value = False
+    # Signal the worker thread to exit cleanly
+    _detection_worker_stop.set()
+    if _detection_worker_thread is not None:
+        _detection_worker_thread.join(timeout=3)
+        _detection_worker_thread = None
+    with _latest_detections_lock:
+        _latest_detections.clear()
     return {"status": "stopped"}
 
 
