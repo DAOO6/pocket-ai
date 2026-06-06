@@ -11,14 +11,13 @@ from pathlib import Path
 import cv2
 import glob
 import psutil
-from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
 IS_WINDOWS = sys.platform == "win32"
 
-# Project root for hailo_od and default HEF
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -45,10 +44,6 @@ def run_stream_process(
     width: int = STREAM_WIDTH,
     height: int = STREAM_HEIGHT,
 ):
-    """
-    Runs in a subprocess. On Pi (non-Windows) uses picamera2; on Windows uses
-    OpenCV VideoCapture to grab the default webcam.
-    """
     if IS_WINDOWS:
         _run_opencv_stream(stream_queue, stop_event, detection_enabled, detection_queue, width, height)
     else:
@@ -56,13 +51,15 @@ def run_stream_process(
 
 
 def _run_opencv_stream(stream_queue, stop_event, detection_enabled, detection_queue, width, height):
-    """OpenCV-based camera capture for Windows / any platform without picamera2."""
+    """OpenCV webcam capture for Windows."""
 
     def init_camera():
-        cap = cv2.VideoCapture(0)  # 0 = default / front-facing webcam
+        cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            raise RuntimeError("Could not open webcam (VideoCapture index 0). "
-                               "Check that your camera is connected and not in use.")
+            raise RuntimeError(
+                "Could not open webcam (VideoCapture index 0). "
+                "Check that your camera is connected and not in use."
+            )
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         cap.set(cv2.CAP_PROP_FPS, STREAM_FPS)
@@ -82,7 +79,6 @@ def _run_opencv_stream(stream_queue, stop_event, detection_enabled, detection_qu
             if not ret or frame is None:
                 logger.warning("Frame capture failed, retrying...")
                 time.sleep(0.1)
-                # Try to reinitialise
                 cap.release()
                 time.sleep(CAMERA_RESTART_DELAY)
                 if stop_event.is_set():
@@ -97,7 +93,6 @@ def _run_opencv_stream(stream_queue, stop_event, detection_enabled, detection_qu
             # OpenCV gives BGR; convert to RGB for consistency
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-            # Resize to expected stream dimensions
             if frame_rgb.shape[1] != width or frame_rgb.shape[0] != height:
                 frame_rgb = cv2.resize(frame_rgb, (width, height), interpolation=cv2.INTER_LINEAR)
 
@@ -121,7 +116,7 @@ def _run_opencv_stream(stream_queue, stop_event, detection_enabled, detection_qu
 
 
 def _run_picamera_stream(stream_queue, stop_event, detection_enabled, detection_queue, width, height):
-    """Original Pi-only picamera2-based stream (unchanged from original code)."""
+    """Original Pi-only picamera2 stream."""
     from picamera2 import Picamera2
 
     def init_camera():
@@ -224,16 +219,86 @@ _latest_detections_lock = threading.Lock()
 _detection_worker_thread = None
 _detection_worker_stop = threading.Event()
 
+# Hailo paths (Pi only — ignored on Windows)
 DEFAULT_HEF = PROJECT_ROOT / "models" / "yolov11l.hef"
 CONFIG_PATH = PROJECT_ROOT / "hailo_od" / "config.json"
 
 
+# ---------------------------------------------------------------------------
+# Detection worker — YOLOv8 on Windows, Hailo on Pi
+# ---------------------------------------------------------------------------
+
 def _run_detection_worker():
-    """Runs in a background thread; Hailo-based detection (Pi only). Skipped on Windows."""
     if IS_WINDOWS:
-        logger.info("[detection] Hailo detection not supported on Windows; worker not started.")
+        _run_yolo_detection_worker()
+    else:
+        _run_hailo_detection_worker()
+
+
+def _run_yolo_detection_worker():
+    """
+    YOLOv8 nano object detection using Ultralytics.
+    Runs entirely on CPU — no special hardware needed.
+    Model downloads automatically on first use (~6 MB for nano).
+    """
+    try:
+        from ultralytics import YOLO
+    except ImportError:
+        logger.error(
+            "[detection] ultralytics not installed. Run: pip install ultralytics"
+        )
         return
 
+    logger.info("[detection] Loading YOLOv8 nano model...")
+    try:
+        # yolov8n.pt downloads automatically to ~/.ultralytics on first run
+        model = YOLO("yolov8n.pt")
+        logger.info("[detection] YOLOv8 nano loaded.")
+    except Exception as e:
+        logger.error("[detection] Failed to load YOLOv8 model: %s", e)
+        return
+
+    while not _detection_worker_stop.is_set():
+        if not detection_enabled.value:
+            time.sleep(0.3)
+            continue
+
+        try:
+            frame = detection_queue.get(timeout=1.0)
+        except Exception:
+            continue
+
+        try:
+            # frame is RGB numpy array; YOLO accepts RGB directly
+            results = model(frame, verbose=False, conf=0.35)
+            result = results[0]
+
+            payload = []
+            h, w = frame.shape[0], frame.shape[1]
+
+            for box in result.boxes:
+                # Normalise bbox to 0-1 range to match the original Hailo output format
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                payload.append({
+                    "bbox": [x1 / w, y1 / h, x2 / w, y2 / h],
+                    "label": result.names[int(box.cls[0])],
+                    "confidence": float(box.conf[0]),
+                })
+
+            with _latest_detections_lock:
+                _latest_detections[:] = payload
+
+            if _detection_loop:
+                _detection_loop.call_soon_threadsafe(_schedule_broadcast)
+
+        except Exception as e:
+            logger.warning("[detection] YOLOv8 inference error: %s", e)
+
+    logger.info("[detection] YOLOv8 worker stopped.")
+
+
+def _run_hailo_detection_worker():
+    """Original Hailo NPU detection worker (Pi only)."""
     import numpy as np
 
     infer = None
@@ -243,7 +308,7 @@ def _run_detection_worker():
 
     try:
         from hailo_od.hailo_inference import HailoInfer
-        from hailo_od.toolbox import get_labels, load_json_file, default_preprocess
+        from hailo_od.toolbox import get_labels, default_preprocess
         from hailo_od.object_detection_post_process import extract_detections
     except Exception as e:
         logger.warning("[detection] hailo_od import failed: %s", e)
@@ -350,7 +415,7 @@ def _run_detection_worker():
             infer.close()
         except Exception:
             pass
-    logger.info("[detection] worker stopped")
+    logger.info("[detection] Hailo worker stopped")
 
 
 def _raw_to_per_class_list(raw):
@@ -375,6 +440,10 @@ def _raw_to_per_class_list(raw):
     return [raw]
 
 
+# ---------------------------------------------------------------------------
+# WebSocket broadcast helpers
+# ---------------------------------------------------------------------------
+
 async def _broadcast_detections():
     with _latest_detections_lock:
         data = list(_latest_detections)
@@ -394,6 +463,10 @@ def _schedule_broadcast():
     asyncio.run_coroutine_threadsafe(_broadcast_detections(), _detection_loop)
 
 
+# ---------------------------------------------------------------------------
+# System stats
+# ---------------------------------------------------------------------------
+
 def get_cpu_temp():
     try:
         temps = psutil.sensors_temperatures()
@@ -407,9 +480,7 @@ def get_cpu_temp():
                     return v[0].current
     except Exception:
         pass
-    # Windows: psutil.sensors_temperatures() returns {} — not supported
-    # Fall back gracefully
-    return 0
+    return 0  # Windows doesn't expose temps via psutil
 
 
 @router.get("/system/stats")
@@ -421,6 +492,10 @@ async def get_stats():
         "temperature": get_cpu_temp()
     }
 
+
+# ---------------------------------------------------------------------------
+# Camera endpoints
+# ---------------------------------------------------------------------------
 
 @router.post("/camera/start")
 async def start_camera():
@@ -460,7 +535,7 @@ def generate_frames():
         if frame is None:
             break
 
-        # On Pi the frame is portrait from the ribbon cable; skip rotation on Windows webcam.
+        # Pi camera feeds portrait via ribbon cable; laptop webcam is already landscape
         if not IS_WINDOWS:
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             frame = cv2.resize(frame, (480, 800), interpolation=cv2.INTER_LINEAR)
@@ -518,6 +593,10 @@ async def stop_detection():
     return {"status": "stopped"}
 
 
+# ---------------------------------------------------------------------------
+# Gallery
+# ---------------------------------------------------------------------------
+
 @router.get("/gallery/images")
 async def list_gallery_images():
     files = glob.glob("captures/*.jpg")
@@ -540,6 +619,10 @@ async def delete_gallery_image(filename: str):
             return {"status": "error", "message": str(e)}
     return {"status": "error", "message": "File not found"}
 
+
+# ---------------------------------------------------------------------------
+# Detection WebSocket
+# ---------------------------------------------------------------------------
 
 @router.websocket("/ws/detections")
 async def detection_websocket(websocket: WebSocket):
