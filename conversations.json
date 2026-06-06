@@ -1,182 +1,5 @@
 [
   {
-    "id": "37bc0f35-a1c6-4bee-99a0-b52112815940",
-    "title": "get weather atl",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Get weather in atl"
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:get_weather{location:<escape>atl<escape>}<end_function_call>",
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Weather for Atlanta: Cloudy, 21.9\u00b0C, humidity 83%, wind 12.8 km/h."
-      },
-      {
-        "role": "user",
-        "content": "Get weather in atl"
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:get_weather{location:<escape>atl<escape>}<end_function_call>",
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Weather for Atlanta: Partly cloudy, 22.4\u00b0C, humidity 82%, wind 11.8 km/h."
-      },
-      {
-        "role": "user",
-        "content": "Get weather in atl"
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:get_weather{location:<escape>atl<escape>}<end_function_call>",
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Weather for Atlanta: Partly cloudy, 22.4\u00b0C, humidity 82%, wind 11.8 km/h."
-      },
-      {
-        "role": "user",
-        "content": "Get weather in atl"
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:get_weather{location:<escape>atl<escape>}<end_function_call>",
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Weather for Atlanta: Partly cloudy, 22.4\u00b0C, humidity 82%, wind 11.8 km/h."
-      },
-      {
-        "role": "user",
-        "content": "Get weather in atl"
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:get_weather{location:<escape>atl<escape>}<end_function_call>",
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Weather for Atlanta: Partly cloudy, 22.4\u00b0C, humidity 82%, wind 11.8 km/h."
-      }
-    ],
-    "updated_at": 1772906611.8085742
-  },
-  {
-    "id": "58e208ee-2897-4e23-a361-f267a13b47b2",
-    "title": "Do a web search for the latest...",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Do a web search for the latest news.",
-        "timestamp": 1772908333.488685
-      }
-    ],
-    "updated_at": 1772908333.488693
-  },
-  {
-    "id": "cf2018b2-9ea6-4d4f-b358-cf1cebc298a4",
-    "title": "Do a web search for the latest...",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Do a web search for the latest news.",
-        "timestamp": 1772908383.1638646
-      }
-    ],
-    "updated_at": 1772908383.1638775
-  },
-  {
-    "id": "8d772852-ff40-43d0-afb3-a84c48176e65",
-    "title": "Can you stand my network pleas...",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Can you stand my network please?",
-        "timestamp": 1772910553.1349354
-      },
-      {
-        "role": "user",
-        "content": "scan network",
-        "timestamp": 1772911102.24426
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:network_scan{}<end_function_call>",
-        "timestamp": 1772911113.5927093,
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Network scan:\n10.0.0.1  70:13:01:8c:10:0f\nfe80::7213:1ff:fe8c:100f  70:13:01:8c:10:0f",
-        "timestamp": 1772911113.5927129
-      },
-      {
-        "role": "user",
-        "content": "search for any breaking news",
-        "timestamp": 1772911121.687354
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:web_search{query:<escape>breaking news<escape>}<end_function_call>",
-        "timestamp": 1772911126.9545774,
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Web search:\n\u2022 Breaking news \u2014 Breaking news, also called late-breaking news, a special report, special coverage, or a news flash, is a current issue that warrants the interruption of a scheduled broadcast in order to report its de\u2026 (https://en.wikipedia.org/wiki/Breaking_news)\n\u2022 Breaking news \u2014 Breaking news constitutes the urgent dissemination of information about significant, unfolding events or recent incidents through mass media, prioritizing real-time updates to alert... (https://grokipedia.com/page/Breaking_news)\n\u2022 Fox News - Breaking News Updates | Latest News Headlines ... \u2014 Fox News will use your zip code below to bring you the latest weather data in your area. (https://www.foxnews.com/)\n\u2022 Associated Press News: Breaking News, Latest Headlines and ... \u2014 Read the latest headlines, breaking news , and videos at APNews.com, the definitive source for independent journalism from every corner of the globe. (https://apnews.com/)\n\u2022 Breaking News, Latest News and Videos | CNN \u2014 View the latest news and breaking news today for U.S., world, weather, entertainment, politics and health at CNN. com . (https://www.cnn.com/)\n\u2022 NBC News - Breaking Headlines and Video Reports on World, U.S ... \u2014 Go to NBCNews.com for breaking news , videos, and the latest top stories in world news, business, politics, health and pop culture. (https://www.nbcnews.com/)",
-        "timestamp": 1772911126.954581
-      },
-      {
-        "role": "user",
-        "content": "search for any breaking news",
-        "timestamp": 1772911177.9302704
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:web_search{query:<escape>breaking news<escape>}<end_function_call>",
-        "timestamp": 1772911189.3298056,
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Web search:\n\u2022 Breaking news \u2014 Breaking news, also called late-breaking news, a special report, special coverage, or a news flash, is a current issue that warrants the interruption of a scheduled broadcast in order to report its de\u2026 (https://en.wikipedia.org/wiki/Breaking_news)\n\u2022 Breaking news \u2014 Breaking news constitutes the urgent dissemination of information about significant, unfolding events or recent incidents through mass media, prioritizing real-time updates to alert... (https://grokipedia.com/page/Breaking_news)\n\u2022 Fox News - Breaking News Updates | Latest News Headlines | Photos ... \u2014 3 hours ago \u00b7 Fox News Flash \u00b7 US student rescued from Mideast describes missile activity in Abu Dhabi when class trip turned 'scary' \u00b7 Comer claims whistleblowers warned ... (https://www.foxnews.com/)\n\u2022 ABC News - Breaking News, Latest News and Videos \u2014 3 hours ago \u00b7 Your trusted source for breaking news, analysis, exclusive interviews, headlines, and videos at ABCNews.com. (https://abcnews.com/)\n\u2022 Breaking News: Ian Huntley, whose murder of two schoolgirls in 2002 ... \u2014 57 minutes ago \u00b7 Breaking News: Ian Huntley, whose murder of two schoolgirls in 2002 shook Britain, is dead after being attacked in prison. (https://www.facebook.com/nytimes/posts/breaking-news-ian-huntley-whose-murder-of-two-schoolgirls-in-2002-shook-britain-/1315341390448321/)\n\u2022 The New York Times - Breaking News, US News, World News and ... \u2014 24 minutes ago \u00b7 More News \u00b7 Communities Survey Devastation After Tornadoes in Michigan and Oklahoma. At least six people were dead and well over a dozen injured between the two ... (https://www.nytimes.com/)",
-        "timestamp": 1772911189.3298087
-      },
-      {
-        "role": "user",
-        "content": "Scan my network.",
-        "timestamp": 1772911384.4539278
-      },
-      {
-        "role": "assistant",
-        "content": "<start_function_call>call:network_scan{}<end_function_call>",
-        "timestamp": 1772911390.6360855,
-        "hidden": true
-      },
-      {
-        "role": "assistant",
-        "content": "Network scan:\n10.0.0.1  70:13:01:8c:10:0f\nfe80::7213:1ff:fe8c:100f  70:13:01:8c:10:0f",
-        "timestamp": 1772911390.6360898
-      },
-      {
-        "role": "user",
-        "content": "I want you.",
-        "timestamp": 1772911416.1973226
-      }
-    ],
-    "updated_at": 1772911416.1973336
-  },
-  {
     "id": "392bda2f-c285-4c45-a15d-e2f76033e347",
     "title": "Scan my network.",
     "messages": [
@@ -195,8 +18,101 @@
         "role": "assistant",
         "content": "Network scan:\n10.0.0.1  70:13:01:8c:10:0f\nfe80::7213:1ff:fe8c:100f  70:13:01:8c:10:0f",
         "timestamp": 1772911495.731512
+      },
+      {
+        "role": "user",
+        "content": "Hello?",
+        "timestamp": 1780509666.8703485
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nHello! I'm here to help you. What can I do for you?",
+        "timestamp": 1780509672.5473628
+      },
+      {
+        "role": "user",
+        "content": "What's your name?",
+        "timestamp": 1780509687.6586573
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nMy name is a helpful assistant. How can I assist you today?",
+        "timestamp": 1780509690.464272
+      },
+      {
+        "role": "user",
+        "content": "scan my network",
+        "timestamp": 1780654794.9420376
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nSure! I can help you scan your network. What would you like me to do with it?",
+        "timestamp": 1780654798.0790572
+      },
+      {
+        "role": "user",
+        "content": "just relay the information back to me after scanning my network",
+        "timestamp": 1780654816.851272
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nSure! After scanning your network, I can relay the information back to you in a clear format. Could you please provide the scanned results?",
+        "timestamp": 1780654818.8792186
+      },
+      {
+        "role": "user",
+        "content": "no, can you scan my network please?",
+        "timestamp": 1780654833.1674838
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nSure! I can help you scan your network. Please provide the IP address or details about your network.",
+        "timestamp": 1780654834.986446
+      },
+      {
+        "role": "user",
+        "content": "so right now you dont have access to my network?",
+        "timestamp": 1780654847.26806
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nNo, I don't have access to your network at this time. If you're looking to scan your own network, please provide the IP address or details about your network so I can assist you effectively.",
+        "timestamp": 1780654848.8486812
+      },
+      {
+        "role": "user",
+        "content": "alright, nevermind then",
+        "timestamp": 1780654857.3716753
+      },
+      {
+        "role": "assistant",
+        "content": "<think>\n\n</think>\n\nAlright, thanks for the clarification. If you need help scanning your own network, please provide the IP address or details about your network.",
+        "timestamp": 1780654858.8363912
       }
     ],
-    "updated_at": 1772911495.7315214
+    "updated_at": 1780654858.8363912
+  },
+  {
+    "id": "0491a4c0-26aa-4772-b255-929297f52fb5",
+    "title": "scan my network",
+    "messages": [
+      {
+        "role": "user",
+        "content": "scan my network",
+        "timestamp": 1780693025.9418607
+      },
+      {
+        "role": "assistant",
+        "content": "<start_function_call>call:network_scan{}<end_function_call>",
+        "timestamp": 1780693028.0343282,
+        "hidden": true
+      },
+      {
+        "role": "assistant",
+        "content": "Network scan (ARP):\n192.168.0.1  5c-4d-bf-b3-27-35\n192.168.0.217  16-ef-6e-21-52-25\n192.168.0.242  82-56-98-c1-3f-3a\n224.0.0.22  01-00-5e-00-00-16\n224.0.0.251  01-00-5e-00-00-fb\n224.0.0.252  01-00-5e-00-00-fc\n239.255.255.250  01-00-5e-7f-ff-fa",
+        "timestamp": 1780693028.0343282
+      }
+    ],
+    "updated_at": 1780693028.0343282
   }
 ]

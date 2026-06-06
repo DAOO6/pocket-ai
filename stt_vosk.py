@@ -7,7 +7,7 @@ from vosk import Model, KaldiRecognizer
 
 # --- CONFIGURATION ---
 # Using your absolute path to the Vosk model
-MODEL_PATH = "/home/pocket-ai/Documents/pocket-ai/models/vosk/vosk-model-small-en-us-0.15"        
+MODEL_PATH = r"C:\Users\Daanish Ahmed\Documents\JARVIS_Project\pocket-ai\models\vosk\vosk-model-small-en-us-0.15"       
 CHUNK_SIZE = 4000           # Frames per buffer
 FORMAT = pyaudio.paInt16    # 16-bit PCM
 CHANNELS = 1                # Mono

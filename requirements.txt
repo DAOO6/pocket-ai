@@ -15,7 +15,12 @@ numpy==2.4.2
 
 # Audio I/O (STT capture)
 # System dependency (Debian/Ubuntu): sudo apt-get update && sudo apt-get install -y portaudio19-dev
+# On Windows: PyAudio wheels are available via pip directly (no extra build tools needed).
 PyAudio==0.2.14
+
+# Audio playback (TTS output)
+# Used on Windows instead of aplay (Linux ALSA). Cross-platform; also works on Linux/Mac.
+sounddevice==0.5.1
 
 # Speech-to-text
 faster-whisper==1.2.1
@@ -39,7 +44,7 @@ ddgs>=9.0.0
 # Semantic routing (semantic_router.py): pip install "semantic-router[local]"
 # semantic-router[local]
 
-# Hailo object detection (object_detection.py + hailo_od)
+# Hailo object detection (object_detection.py + hailo_od) — Pi only
 lap>=0.4.0
 cython_bbox  # may need building on Pi; install from project .venv
 PyYAML>=6.0
