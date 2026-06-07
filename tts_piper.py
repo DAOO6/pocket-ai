@@ -29,7 +29,7 @@ def split_sentences(text):
 
 
 class PocketAudio:
-    def __init__(self, model_name="en_US-lessac-medium"):
+    def __init__(self, model_name="en_US-ryan-high"):
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_dir = os.path.join(self.base_dir, "models")
         self.model_path = os.path.join(self.model_dir, f"{model_name}.onnx")
@@ -52,13 +52,42 @@ class PocketAudio:
     def _ensure_models_exist(self, name):
         if not os.path.exists(self.model_dir):
             os.makedirs(self.model_dir)
-        size = name.split("-")[-1]
-        url_base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/{size}/"
+        parts = name.split("-")
+        quality = parts[-1]
+        speaker = parts[-2]
+        url_base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/{speaker}/{quality}/"
         for ext in [".onnx", ".onnx.json"]:
             path = self.model_path if ext == ".onnx" else self.config_path
             if not os.path.exists(path):
-                print(f"Downloading {name}{ext}...")
-                urllib.request.urlretrieve(url_base + name + ext, path)
+                url = url_base + name + ext
+                self._download_with_retry(url, path, name + ext)
+
+    def _download_with_retry(self, url, dest_path, label, max_retries=5):
+        """Download a file with resume support and automatic retries."""
+        for attempt in range(1, max_retries + 1):
+            existing = os.path.getsize(dest_path) if os.path.exists(dest_path) else 0
+            headers = {}
+            if existing > 0:
+                headers["Range"] = f"bytes={existing}-"
+                print(f"Resuming {label} from {existing // (1024*1024)}MB (attempt {attempt}/{max_retries})...")
+            else:
+                print(f"Downloading {label}... (attempt {attempt}/{max_retries})")
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    mode = "ab" if existing > 0 else "wb"
+                    with open(dest_path, mode) as f:
+                        while True:
+                            chunk = resp.read(1024 * 1024)  # 1MB chunks
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                print(f"Downloaded {label} successfully.")
+                return
+            except Exception as e:
+                print(f"Download error ({e}), retrying...")
+                time.sleep(2)
+        raise RuntimeError(f"Failed to download {label} after {max_retries} attempts.")
 
     def set_queue_drained_callback(self, callback):
         self._queue_drained_callback = callback
