@@ -158,6 +158,10 @@ class PocketAudio:
             raw_bytes = b"".join(audio_chunks)
             audio_array = np.frombuffer(raw_bytes, dtype=np.int16)
 
+            # Pad with 0.3s of silence at the end to prevent last word clipping
+            silence = np.zeros(int(22050 * 0.3), dtype=np.int16)
+            audio_array = np.concatenate([audio_array, silence])
+
             # Piper outputs mono int16 at 22050 Hz
             sd.play(audio_array, samplerate=22050)
             sd.wait()  # Block until playback is complete
