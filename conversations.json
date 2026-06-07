@@ -164,8 +164,35 @@
         "role": "assistant",
         "content": "<think>\nOkay, the user just asked what they see in the picture. But I don't have access to any images or pictures from the past. My role is to provide helpful information and assistance, so I should let them know that I can't view images and offer help instead.\n\nI need to make sure my response is clear and polite. Maybe mention that I can't see the picture but can help with anything else they might be interested in. Also, check if there's a specific question about the picture that needs addressing, but since it's not mentioned, keep it general.\n</think>\n\nI don\u2019t have access to images or pictures in my current database. However, I can help you answer questions about recipes, music, songs, or other topics! Let me know what you\u2019d like assistance with! \ud83d\ude0a",
         "timestamp": 1780762090.3531432
+      },
+      {
+        "role": "user",
+        "content": "does this work? just running system diagnosticts",
+        "timestamp": 1780844260.1454475
+      },
+      {
+        "role": "assistant",
+        "content": "<start_function_call>call:get_weather{location:<escape>This works<escape>}<end_function_call>",
+        "timestamp": 1780844263.7480943,
+        "hidden": true
+      },
+      {
+        "role": "assistant",
+        "content": "Weather for This works: error \u2014 <urlopen error [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)>",
+        "timestamp": 1780844263.7480943
+      },
+      {
+        "role": "user",
+        "content": "can you respond to this message with hello?",
+        "timestamp": 1780844284.7901847
       }
     ],
-    "updated_at": 1780762090.3531432
+    "updated_at": 1780844284.7901847
+  },
+  {
+    "id": "9ee0a30c-80dd-4d23-a1d7-af2a5d37a4e4",
+    "title": "New Chat",
+    "messages": [],
+    "updated_at": 1780844309.2707736
   }
 ]

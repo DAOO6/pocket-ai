@@ -99,18 +99,68 @@ class PocketAudio:
         except queue.Empty:
             pass
 
+    def _synthesise_to_array(self, text):
+        """Synthesise text to a numpy audio array without playing it."""
+        audio_chunks = []
+        for chunk in self.voice.synthesize(text):
+            audio_chunks.append(chunk.audio_int16_bytes)
+        if not audio_chunks:
+            return None
+        raw_bytes = b"".join(audio_chunks)
+        audio_array = np.frombuffer(raw_bytes, dtype=np.int16)
+        silence = np.zeros(int(22050 * 0.3), dtype=np.int16)
+        return np.concatenate([audio_array, silence])
+
     def _queue_worker(self):
+        """
+        Pre-synthesise the next sentence while the current one is playing,
+        so there is minimal gap between sentences.
+        """
+        import sounddevice as sd
+
+        next_audio = None
+        next_text = None
+
         while True:
             try:
-                text = self._queue.get()
-                if text is None:
+                # Get current sentence (use pre-synthesised if available)
+                if next_audio is not None:
+                    current_audio = next_audio
+                    current_text = next_text
+                    next_audio = None
+                    next_text = None
+                else:
+                    text = self._queue.get()
+                    if text is None:
+                        continue
+                    current_audio = self._synthesise_to_array(text)
+                    current_text = text
+
+                if current_audio is None:
                     continue
-                self._speak_internal(text)
-                if self._queue.empty() and self._queue_drained_callback:
+
+                # Start playback
+                sd.play(current_audio, samplerate=22050)
+
+                # While playing, pre-synthesise the next sentence if one is queued
+                try:
+                    next_text = self._queue.get_nowait()
+                    if next_text is not None:
+                        next_audio = self._synthesise_to_array(next_text)
+                except queue.Empty:
+                    next_audio = None
+                    next_text = None
+
+                # Wait for playback to finish
+                sd.wait()
+
+                # Check if queue is now drained
+                if next_audio is None and self._queue.empty() and self._queue_drained_callback:
                     try:
                         self._queue_drained_callback()
                     except Exception as e:
                         print(f"TTS queue drained callback error: {e}")
+
             except Exception as e:
                 print(f"TTS worker error: {e}")
 

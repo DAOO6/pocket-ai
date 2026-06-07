@@ -511,7 +511,6 @@ async def start_camera():
     global camera_process, stop_event
     if camera_process and camera_process.is_alive():
         return {"status": "already_running"}
-    # Flush stale frames from previous session before starting
     _flush_queue(stream_queue)
     _flush_queue(detection_queue)
     stop_event.clear()
@@ -528,11 +527,15 @@ async def stop_camera():
     global camera_process, stop_event
     if camera_process:
         stop_event.set()
-        camera_process.join(timeout=2)
-        if camera_process.is_alive():
-            camera_process.terminate()
+        proc = camera_process
         camera_process = None
-    # Flush queues so next start gets a clean slate
+        # Run the blocking join/terminate in a thread so we don't freeze the event loop
+        loop = asyncio.get_running_loop()
+        def _kill_proc():
+            proc.join(timeout=2)
+            if proc.is_alive():
+                proc.terminate()
+        await loop.run_in_executor(None, _kill_proc)
     _flush_queue(stream_queue)
     _flush_queue(detection_queue)
     return {"status": "stopped"}
@@ -595,10 +598,9 @@ async def start_detection():
     global _detection_loop, _detection_worker_thread
     detection_enabled.value = True
     _detection_loop = asyncio.get_running_loop()
-    # Always spawn a fresh worker — stop any existing one first
-    if _detection_worker_thread is not None and _detection_worker_thread.is_alive():
-        _detection_worker_stop.set()
-        _detection_worker_thread.join(timeout=3)
+    # Signal any existing worker to stop, then spawn a fresh one
+    # Don't join() — let the daemon thread die on its own
+    _detection_worker_stop.set()
     _detection_worker_stop.clear()
     _detection_worker_thread = threading.Thread(target=_run_detection_worker, daemon=True)
     _detection_worker_thread.start()
@@ -609,11 +611,10 @@ async def start_detection():
 async def stop_detection():
     global _detection_worker_thread
     detection_enabled.value = False
-    # Signal the worker thread to exit cleanly
+    # Signal the worker to stop — don't join() here as it blocks the event loop
+    # The thread is a daemon so it will be cleaned up automatically
     _detection_worker_stop.set()
-    if _detection_worker_thread is not None:
-        _detection_worker_thread.join(timeout=3)
-        _detection_worker_thread = None
+    _detection_worker_thread = None
     with _latest_detections_lock:
         _latest_detections.clear()
     return {"status": "stopped"}
@@ -666,7 +667,10 @@ async def detection_websocket(websocket: WebSocket):
             except asyncio.TimeoutError:
                 await websocket.send_text(json.dumps({"type": "ping"}))
             except WebSocketDisconnect:
-                pass
+                break
+            except RuntimeError:
+                # Socket already closed — exit cleanly
+                break
     finally:
         with _detection_ws_lock:
             _detection_ws_set.discard(websocket)
