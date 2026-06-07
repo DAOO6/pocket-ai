@@ -12,13 +12,18 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+import urllib.request
+import urllib.error
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
-from huggingface_hub import hf_hub_download
-from llama_cpp import Llama
 from pydantic import BaseModel
 from stt_whisper import STTEngine as WhisperEngine
 from stt_vosk import STTEngine as VoskEngine
 from tts_piper import PocketAudio, split_sentences
+
+# --- Ollama configuration ---
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +70,8 @@ def _run_tool_ai_subprocess(prompt: str) -> tuple:
         return data.get("tool_call_raw"), str(err)
     return data.get("tool_call_raw"), data.get("tool_result")
 
-# --- Model Configuration (from config) ---
-from config import (
-    CONVERSATIONS_FILE,
-    LOCAL_DIR,
-    CHAT_REPO_ID as REPO_ID,
-    CHAT_FILENAME as FILENAME,
-    CHAT_MODEL_PATH as MODEL_PATH,
-)
+# --- Conversation storage ---
+from config import CONVERSATIONS_FILE
 
 def strip_think_for_ui(text: str) -> str:
     """Remove <think>...</think> blocks and any trailing incomplete <think> for UI display. Never send think content to the UI."""
@@ -166,7 +165,7 @@ class AIState:
         self.is_vosk_recording = False
         self.voice_messages = [
             {"role": "system", "content": (
-                "You are Jarvis, Tony Stark's British AI assistant. "
+                "You are Jarvis, Tony Stark's AI assistant. "
                 "Rules you must always follow: "
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
                 "2. Be concise, calm, and precise. No filler words. "
@@ -178,32 +177,30 @@ class AIState:
         ]
 
     def load_model(self):
-        if not os.path.exists(MODEL_PATH):
-            logger.info("Downloading model...")
-            os.makedirs(LOCAL_DIR, exist_ok=True)
-            hf_hub_download(repo_id=REPO_ID, filename=FILENAME, local_dir=LOCAL_DIR)
-
-        logger.info("Loading LLM...")
-        self.llm = Llama(model_path=MODEL_PATH, n_ctx=4096, n_threads=4, verbose=False)
+        logger.info("Connecting to Ollama at %s using model %s...", OLLAMA_BASE_URL, OLLAMA_MODEL)
+        # Verify Ollama is reachable
+        try:
+            req = urllib.request.Request(f"{OLLAMA_BASE_URL}/api/tags")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+            available = [m["name"] for m in data.get("models", [])]
+            if any(OLLAMA_MODEL in m for m in available):
+                logger.info("Ollama ready. Model '%s' found.", OLLAMA_MODEL)
+            else:
+                logger.warning("Ollama is running but model '%s' not found. Available: %s. Run: ollama pull %s", OLLAMA_MODEL, available, OLLAMA_MODEL)
+        except Exception as e:
+            logger.warning("Could not reach Ollama at %s: %s. Make sure Ollama is running.", OLLAMA_BASE_URL, e)
         self.stt.load_model()
         self.vosk.load_model()
         logger.info("Chat AI Ready.")
 
     async def generate_response(self, messages, thinking=True):
-        # Prepare messages (skip hidden tool-call entries so the model only sees user/result text)
+        """Stream a response from Ollama. Yields chunks in llama_cpp-compatible format."""
         llm_messages = []
         for m in messages:
             if m.get("hidden"):
                 continue
-            content = m["content"]
-            # Append mode flag
-            if thinking:
-                if " /no_think" in content: content = content.replace(" /no_think", " /think")
-                elif " /think" not in content: content += " /think"
-            else:
-                if " /think" in content: content = content.replace(" /think", " /no_think")
-                elif " /no_think" not in content: content += " /no_think"
-            llm_messages.append({"role": m["role"], "content": content})
+            llm_messages.append({"role": m["role"], "content": m["content"]})
 
         if not any(m["role"] == "system" for m in llm_messages):
             llm_messages.insert(0, {"role": "system", "content": (
@@ -217,22 +214,49 @@ class AIState:
                 "Example: 'Certainly, sir. The weather in London is overcast, 12 degrees. Hardly surprising.'"
             )})
 
-        # Sampling params based on thinking mode
-        current_temp = 0.6 if thinking else 0.7
-        current_top_p = 0.95 if thinking else 0.8
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "messages": llm_messages,
+            "stream": True,
+            "options": {
+                "temperature": 0.7,
+                "top_p": 0.9,
+                "num_predict": 512,
+            }
+        }).encode("utf-8")
 
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: self.llm.create_chat_completion(
-            messages=llm_messages,
-            max_tokens=2048,
-            temperature=current_temp,
-            top_p=current_top_p,
-            top_k=20,
-            min_p=0.0,
-            presence_penalty=1.5,
-            stream=True
-        ))
-        return response
+
+        def _stream_ollama():
+            """Run in executor — yields llama_cpp-style chunk dicts."""
+            chunks = []
+            try:
+                req = urllib.request.Request(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    for line in resp:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        token = data.get("message", {}).get("content", "")
+                        chunks.append({"choices": [{"delta": {"content": token}}]})
+                        if data.get("done"):
+                            break
+            except Exception as e:
+                logger.error("Ollama stream error: %s", e)
+                chunks.append({"choices": [{"delta": {"content": f" [Error: {e}]"}}]})
+            return chunks
+
+        chunks = await loop.run_in_executor(None, _stream_ollama)
+        return iter(chunks)
 
     async def ai_response_and_speak(self, websocket: WebSocket, text: str, abort_event: asyncio.Event, message_queue: asyncio.Queue):
         """
