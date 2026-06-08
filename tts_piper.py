@@ -29,7 +29,7 @@ def split_sentences(text):
 
 
 class PocketAudio:
-    def __init__(self, model_name="en_US-ryan-high"):
+    def __init__(self, model_name="en_GB-alan-medium"):
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self.model_dir = os.path.join(self.base_dir, "models")
         self.model_path = os.path.join(self.model_dir, f"{model_name}.onnx")
@@ -55,7 +55,10 @@ class PocketAudio:
         parts = name.split("-")
         quality = parts[-1]
         speaker = parts[-2]
-        url_base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/{speaker}/{quality}/"
+        locale = parts[0]  # e.g. en_GB or en_US
+        region = locale.split("_")[1].lower()  # e.g. gb or us
+        lang = locale.split("_")[0]  # e.g. en
+        url_base = f"https://huggingface.co/rhasspy/piper-voices/resolve/main/{lang}/{lang}_{region.upper()}/{speaker}/{quality}/"
         for ext in [".onnx", ".onnx.json"]:
             path = self.model_path if ext == ".onnx" else self.config_path
             if not os.path.exists(path):
