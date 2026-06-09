@@ -385,6 +385,101 @@ class AIState:
 router = APIRouter()
 ai = AIState()
 
+
+# ---------------------------------------------------------------------------
+# Gesture action handler — called by camera_stream gesture worker
+# ---------------------------------------------------------------------------
+
+def _handle_gesture(gesture_name: str):
+    """
+    Called from the gesture worker thread when a gesture fires.
+    Dispatches to the appropriate action via the event loop.
+    """
+    import camera_stream
+    loop = getattr(_handle_gesture, "_loop", None)
+    if loop is None or not loop.is_running():
+        return
+    asyncio.run_coroutine_threadsafe(_dispatch_gesture(gesture_name), loop)
+
+
+async def _dispatch_gesture(gesture_name: str):
+    import camera_stream
+    logger.info("[gesture_action] Dispatching: %s", gesture_name)
+
+    if gesture_name == camera_stream.GESTURE_OPEN_PALM:
+        # Play preloaded greeting instantly
+        ai.tts.clear_queue()
+        ai.tts._queue.put(ai._greeting_audio if hasattr(ai, "_greeting_audio") else "Good day, sir.")
+        # If _greeting_audio is a pre-synthesised array, play directly
+        if hasattr(ai, "_greeting_audio_array") and ai._greeting_audio_array is not None:
+            import sounddevice as sd
+            import numpy as np
+            sd.stop()
+            silence = np.zeros(int(22050 * 0.3), dtype=np.int16)
+            audio = np.concatenate([ai._greeting_audio_array, silence])
+            sd.play(audio, samplerate=22050)
+        else:
+            ai.tts.speak("Good day, sir.")
+
+    elif gesture_name == camera_stream.GESTURE_THUMBS_UP:
+        # Start voice listening — send start_vosk command via internal flag
+        logger.info("[gesture_action] Starting voice listening")
+        ai.is_vosk_recording = True
+
+    elif gesture_name == camera_stream.GESTURE_FIST:
+        # Stop TTS immediately and stop voice listening
+        logger.info("[gesture_action] Stopping TTS and voice listening")
+        ai.tts.clear_queue()
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:
+            pass
+        ai.is_vosk_recording = False
+        ai.is_recording = False
+
+    elif gesture_name == camera_stream.GESTURE_PEACE:
+        # Take a camera capture
+        logger.info("[gesture_action] Capturing image")
+        try:
+            import urllib.request as _ur
+            req = _ur.Request("http://localhost:8000/camera/capture", method="POST")
+            req.add_header("Content-Type", "application/json")
+            _ur.urlopen(req, data=b"{}", timeout=5)
+            ai.tts.speak("Image captured, sir.")
+        except Exception as e:
+            logger.warning("[gesture_action] Capture failed: %s", e)
+
+    elif gesture_name == camera_stream.GESTURE_CALL_ME:
+        # Start a new conversation
+        logger.info("[gesture_action] Starting new conversation")
+        ai.conv_manager.create_conversation(title="Gesture — New Chat")
+        ai.tts.speak("New conversation started, sir.")
+
+
+def _register_gesture_callback(loop):
+    """Register the gesture callback with camera_stream and store the event loop."""
+    try:
+        import camera_stream
+        _handle_gesture._loop = loop
+        camera_stream.set_gesture_action_callback(_handle_gesture)
+        logger.info("Gesture action callback registered.")
+    except Exception as e:
+        logger.warning("Could not register gesture callback: %s", e)
+
+
+def _preload_greeting(tts: PocketAudio):
+    """Pre-synthesise the greeting audio at startup so open_palm plays instantly."""
+    try:
+        import numpy as np
+        audio = tts._synthesise_to_array("Good day, sir.")
+        ai._greeting_audio_array = audio
+        logger.info("Greeting audio preloaded.")
+    except Exception as e:
+        ai._greeting_audio_array = None
+        logger.warning("Could not preload greeting: %s", e)
+
+
 @router.get("/conversations")
 async def list_conversations():
     return ai.conv_manager.list_conversations()
@@ -680,3 +775,27 @@ async def voice_websocket(websocket: WebSocket):
         traceback.print_exc()
     finally:
         receive_task.cancel()
+
+
+# ---------------------------------------------------------------------------
+# Module-level startup: preload greeting + register gesture callback
+# This runs once when app.py imports this module.
+# ---------------------------------------------------------------------------
+
+def _on_startup():
+    import asyncio
+    loop = asyncio.get_event_loop()
+    _preload_greeting(ai.tts)
+    _register_gesture_callback(loop)
+
+# Schedule startup tasks to run once the event loop is running
+import asyncio as _asyncio
+
+async def _startup_tasks():
+    _preload_greeting(ai.tts)
+    _register_gesture_callback(_asyncio.get_running_loop())
+
+# Register as a router startup event so it runs after the server starts
+@router.on_event("startup")
+async def on_startup():
+    await _startup_tasks()

@@ -228,216 +228,259 @@ CONFIG_PATH = PROJECT_ROOT / "hailo_od" / "config.json"
 # Detection worker — YOLOv8 on Windows, Hailo on Pi
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Gesture recogniser — MediaPipe Hands
+# ---------------------------------------------------------------------------
+
+# Gesture names (used for display label and action dispatch)
+GESTURE_OPEN_PALM   = "open_palm"
+GESTURE_THUMBS_UP   = "thumbs_up"
+GESTURE_FIST        = "fist"
+GESTURE_PEACE       = "peace"
+GESTURE_CALL_ME     = "call_me"
+GESTURE_NONE        = None
+
+GESTURE_HOLD_FRAMES   = 15   # ~1 second at ~15 fps detections
+GESTURE_COOLDOWN_SEC  = 3.0
+
+# Shared state written by the gesture worker, read by the broadcast helper
+_current_gesture      = None          # gesture being held right now (for label)
+_current_gesture_lock = threading.Lock()
+
+# Callback set by chat_ai so gestures can trigger actions
+_gesture_action_callback = None  # callable(gesture_name: str)
+
+
+def set_gesture_action_callback(cb):
+    global _gesture_action_callback
+    _gesture_action_callback = cb
+
+
+def _classify_gesture(hand_landmarks):
+    """
+    Classify a single hand into one of our 5 gestures using MediaPipe landmark indices.
+    Returns a gesture constant or GESTURE_NONE.
+    Landmark indices: https://developers.google.com/mediapipe/solutions/vision/hand_landmarker
+    """
+    lm = hand_landmarks.landmark
+
+    # Tip and base (MCP) indices for each finger
+    THUMB_TIP, THUMB_IP   = 4, 3
+    INDEX_TIP, INDEX_MCP  = 8, 5
+    MIDDLE_TIP, MIDDLE_MCP = 12, 9
+    RING_TIP, RING_MCP    = 16, 13
+    PINKY_TIP, PINKY_MCP  = 20, 17
+    WRIST                 = 0
+
+    def up(tip, mcp):
+        return lm[tip].y < lm[mcp].y  # lower y = higher on screen
+
+    def down(tip, mcp):
+        return lm[tip].y > lm[mcp].y
+
+    thumb_up_geom   = lm[THUMB_TIP].y < lm[THUMB_IP].y
+    index_up        = up(INDEX_TIP, INDEX_MCP)
+    middle_up       = up(MIDDLE_TIP, MIDDLE_MCP)
+    ring_up         = up(RING_TIP, RING_MCP)
+    pinky_up        = up(PINKY_TIP, PINKY_MCP)
+
+    index_down      = down(INDEX_TIP, INDEX_MCP)
+    middle_down     = down(MIDDLE_TIP, MIDDLE_MCP)
+    ring_down       = down(RING_TIP, RING_MCP)
+    pinky_down      = down(PINKY_TIP, PINKY_MCP)
+    thumb_down_geom = lm[THUMB_TIP].y > lm[THUMB_IP].y
+
+    # Open palm: all fingers extended
+    if index_up and middle_up and ring_up and pinky_up:
+        return GESTURE_OPEN_PALM
+
+    # Thumbs up: thumb up, all fingers curled
+    if thumb_up_geom and index_down and middle_down and ring_down and pinky_down:
+        return GESTURE_THUMBS_UP
+
+    # Fist: all fingers curled, thumb alongside
+    if index_down and middle_down and ring_down and pinky_down:
+        return GESTURE_FIST
+
+    # Peace / V sign: index + middle up, ring + pinky down
+    if index_up and middle_up and ring_down and pinky_down:
+        return GESTURE_PEACE
+
+    # Call me: pinky + thumb extended, middle three down
+    if pinky_up and index_down and middle_down and ring_down:
+        return GESTURE_CALL_ME
+
+    return GESTURE_NONE
+
+
 def _run_detection_worker():
-    if IS_WINDOWS:
-        _run_yolo_detection_worker()
-    else:
-        _run_hailo_detection_worker()
-
-
-def _run_yolo_detection_worker():
-    """
-    YOLOv8 nano object detection using Ultralytics.
-    Runs entirely on CPU — no special hardware needed.
-    Model downloads automatically on first use (~6 MB for nano).
-    """
+    """Gesture detection worker using MediaPipe Hands (compatible with 0.10.x+)."""
     try:
-        from ultralytics import YOLO
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
     except ImportError:
-        logger.error(
-            "[detection] ultralytics not installed. Run: pip install ultralytics"
+        logger.error("[gesture] mediapipe not installed. Run: pip install mediapipe")
+        return
+
+    # Try new Tasks API first (0.10.x+), fall back to legacy solutions API
+    hands = None
+    use_legacy = False
+
+    try:
+        # New API — requires a model file download
+        model_path = str(PROJECT_ROOT / "models" / "hand_landmarker.task")
+        if not os.path.isfile(model_path):
+            logger.info("[gesture] Downloading hand landmarker model...")
+            import urllib.request as _ur
+            _ur.urlretrieve(
+                "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                model_path
+            )
+            logger.info("[gesture] Hand landmarker model downloaded.")
+
+        base_options = mp_python.BaseOptions(model_asset_path=model_path)
+        options = mp_vision.HandLandmarkerOptions(
+            base_options=base_options,
+            num_hands=1,
+            min_hand_detection_confidence=0.7,
+            min_hand_presence_confidence=0.6,
+            min_tracking_confidence=0.6,
+            running_mode=mp_vision.RunningMode.IMAGE,
         )
-        return
-
-    logger.info("[detection] Loading YOLOv8 nano model...")
-    try:
-        # yolov8n.pt downloads automatically to ~/.ultralytics on first run
-        model = YOLO("yolov8n.pt")
-        logger.info("[detection] YOLOv8 nano loaded.")
+        hands = mp_vision.HandLandmarker.create_from_options(options)
+        logger.info("[gesture] MediaPipe HandLandmarker (new API) ready.")
     except Exception as e:
-        logger.error("[detection] Failed to load YOLOv8 model: %s", e)
-        return
+        logger.warning("[gesture] New API failed (%s), trying legacy solutions API...", e)
+        use_legacy = True
 
-    while not _detection_worker_stop.is_set():
-        if not detection_enabled.value:
-            time.sleep(0.3)
-            continue
-
+    if use_legacy:
         try:
-            frame = detection_queue.get(timeout=1.0)
-        except Exception:
-            continue
-
-        try:
-            # frame is RGB numpy array; YOLO accepts RGB directly
-            results = model(frame, verbose=False, conf=0.35)
-            result = results[0]
-
-            payload = []
-            h, w = frame.shape[0], frame.shape[1]
-
-            for box in result.boxes:
-                # Normalise bbox to 0-1 range to match the original Hailo output format
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                payload.append({
-                    "bbox": [x1 / w, y1 / h, x2 / w, y2 / h],
-                    "label": result.names[int(box.cls[0])],
-                    "confidence": float(box.conf[0]),
-                })
-
-            with _latest_detections_lock:
-                _latest_detections[:] = payload
-
-            if _detection_loop:
-                _detection_loop.call_soon_threadsafe(_schedule_broadcast)
-
+            mp_hands_legacy = mp.solutions.hands
+            hands = mp_hands_legacy.Hands(
+                static_image_mode=False,
+                max_num_hands=1,
+                min_detection_confidence=0.7,
+                min_tracking_confidence=0.6,
+            )
+            logger.info("[gesture] MediaPipe Hands (legacy API) ready.")
         except Exception as e:
-            logger.warning("[detection] YOLOv8 inference error: %s", e)
+            logger.error("[gesture] Both APIs failed: %s", e)
+            return
 
-    logger.info("[detection] YOLOv8 worker stopped.")
+    hold_gesture   = GESTURE_NONE
+    hold_count     = 0
+    last_fired     = {}
+    last_broadcast = None
 
+    def _process_frame(frame):
+        """Process a frame and return landmarks or None. Handles both APIs."""
+        if use_legacy:
+            results = hands.process(frame)
+            if results.multi_hand_landmarks:
+                return results.multi_hand_landmarks[0]
+            return None
+        else:
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+            results  = hands.detect(mp_image)
+            if results.hand_landmarks:
+                return results.hand_landmarks[0]
+            return None
 
-def _run_hailo_detection_worker():
-    """Original Hailo NPU detection worker (Pi only)."""
-    import numpy as np
+    def _classify_new_api(landmarks):
+        """Classify gesture from new API landmark list (NormalizedLandmark objects)."""
+        lm = landmarks  # list of NormalizedLandmark
 
-    infer = None
-    labels = []
-    config_data = {}
-    width = height = 640
+        THUMB_TIP, THUMB_IP    = 4, 3
+        INDEX_TIP, INDEX_MCP   = 8, 5
+        MIDDLE_TIP, MIDDLE_MCP = 12, 9
+        RING_TIP, RING_MCP     = 16, 13
+        PINKY_TIP, PINKY_MCP   = 20, 17
+
+        def up(tip, mcp):   return lm[tip].y < lm[mcp].y
+        def down(tip, mcp): return lm[tip].y > lm[mcp].y
+
+        thumb_up   = lm[THUMB_TIP].y < lm[THUMB_IP].y
+        index_up   = up(INDEX_TIP, INDEX_MCP)
+        middle_up  = up(MIDDLE_TIP, MIDDLE_MCP)
+        ring_up    = up(RING_TIP, RING_MCP)
+        pinky_up   = up(PINKY_TIP, PINKY_MCP)
+        index_down  = down(INDEX_TIP, INDEX_MCP)
+        middle_down = down(MIDDLE_TIP, MIDDLE_MCP)
+        ring_down   = down(RING_TIP, RING_MCP)
+        pinky_down  = down(PINKY_TIP, PINKY_MCP)
+
+        if index_up and middle_up and ring_up and pinky_up:
+            return GESTURE_OPEN_PALM
+        if thumb_up and index_down and middle_down and ring_down and pinky_down:
+            return GESTURE_THUMBS_UP
+        if index_up and middle_up and ring_down and pinky_down:
+            return GESTURE_PEACE
+        if pinky_up and index_down and middle_down and ring_down:
+            return GESTURE_CALL_ME
+        if index_down and middle_down and ring_down and pinky_down:
+            return GESTURE_FIST
+        return GESTURE_NONE
 
     try:
-        from hailo_od.hailo_inference import HailoInfer
-        from hailo_od.toolbox import get_labels, default_preprocess
-        from hailo_od.object_detection_post_process import extract_detections
-    except Exception as e:
-        logger.warning("[detection] hailo_od import failed: %s", e)
-        return
-
-    hef_path = str(DEFAULT_HEF)
-    if not os.path.isfile(hef_path):
-        logger.warning("[detection] HEF not found: %s", hef_path)
-        return
-
-    result_holder = []
-    done_ev = threading.Event()
-
-    def on_done(completion_info, bindings_list=None):
-        if completion_info.exception:
-            result_holder.append(("err", None))
-        else:
-            b = bindings_list[0]
-            if len(b._output_names) == 1:
-                result_holder.append(("ok", b.output().get_buffer()))
-            else:
-                result_holder.append(("ok", {
-                    n: np.expand_dims(b.output(n).get_buffer(), axis=0)
-                    for n in b._output_names
-                }))
-        done_ev.set()
-
-    while not _detection_worker_stop.is_set():
-        if not detection_enabled.value:
-            time.sleep(0.3)
-            continue
-
-        if infer is None:
-            try:
-                infer = HailoInfer(hef_path, batch_size=1)
-                height, width, _ = infer.get_input_shape()
-                labels = get_labels(None)
-                config_data = (
-                    json.load(open(CONFIG_PATH)) if CONFIG_PATH.exists() else
-                    {"visualization_params": {"score_thres": 0.25, "max_boxes_to_draw": 50}}
-                )
-                logger.info("[detection] Hailo model loaded")
-            except Exception as e:
-                logger.warning("[detection] model load failed: %s", e)
-                time.sleep(1)
+        while not _detection_worker_stop.is_set():
+            if not detection_enabled.value:
+                time.sleep(0.3)
+                hold_gesture = GESTURE_NONE
+                hold_count   = 0
                 continue
 
-        try:
-            frame = detection_queue.get(timeout=1.0)
-        except Exception:
-            continue
+            try:
+                frame = detection_queue.get(timeout=1.0)
+            except Exception:
+                continue
 
-        preprocessed = default_preprocess(frame, width, height)
-        result_holder.clear()
-        done_ev.clear()
+            try:
+                landmarks = _process_frame(frame)
+            except Exception as e:
+                logger.warning("[gesture] Frame processing error: %s", e)
+                continue
 
-        try:
-            infer.run([preprocessed], on_done)
-            done_ev.wait(timeout=5.0)
-        except Exception as e:
-            logger.warning("[detection] inference error: %s", e)
-            continue
-
-        if not result_holder or result_holder[0][0] != "ok":
-            continue
-
-        raw = result_holder[0][1]
-
-        try:
-            if isinstance(raw, dict):
-                dets_list = list(raw.values())
-            elif hasattr(raw, "shape") and len(raw.shape) >= 2:
-                dets_list = _raw_to_per_class_list(raw)
+            if landmarks is not None:
+                gesture = _classify_gesture(landmarks) if use_legacy else _classify_new_api(landmarks)
             else:
-                dets_list = raw if isinstance(raw, list) else [raw]
+                gesture = GESTURE_NONE
 
-            det_dict = extract_detections(frame, dets_list, config_data)
-        except Exception as e:
-            logger.warning("[detection] postprocess error: %s", e)
-            continue
+            with _current_gesture_lock:
+                _current_gesture = gesture
 
-        boxes = det_dict["detection_boxes"]
-        classes = det_dict["detection_classes"]
-        scores = det_dict["detection_scores"]
-        h, w = frame.shape[0], frame.shape[1]
+            if gesture != last_broadcast:
+                last_broadcast = gesture
+                if _detection_loop:
+                    _detection_loop.call_soon_threadsafe(_schedule_broadcast)
 
-        payload = []
-        for i in range(len(boxes)):
-            xmin, ymin, xmax, ymax = boxes[i]
-            payload.append({
-                "bbox": [xmin / w, ymin / h, xmax / w, ymax / h],
-                "label": labels[classes[i]] if classes[i] < len(labels) else str(classes[i]),
-                "confidence": float(scores[i]),
-            })
+            if gesture and gesture == hold_gesture:
+                hold_count += 1
+            else:
+                hold_gesture = gesture
+                hold_count   = 1 if gesture else 0
 
-        with _latest_detections_lock:
-            _latest_detections[:] = payload
+            if gesture and hold_count >= GESTURE_HOLD_FRAMES:
+                now  = time.time()
+                last = last_fired.get(gesture, 0)
+                if now - last >= GESTURE_COOLDOWN_SEC:
+                    last_fired[gesture] = now
+                    hold_count = 0
+                    logger.info("[gesture] Fired: %s", gesture)
+                    if _gesture_action_callback:
+                        try:
+                            _gesture_action_callback(gesture)
+                        except Exception as e:
+                            logger.warning("[gesture] Action callback error: %s", e)
+    finally:
+        if hands is not None:
+            try:
+                hands.close()
+            except Exception:
+                pass
 
-        if _detection_loop:
-            _detection_loop.call_soon_threadsafe(_schedule_broadcast)
+    logger.info("[gesture] worker stopped.")
 
-    if infer is not None:
-        try:
-            infer.close()
-        except Exception:
-            pass
-    logger.info("[detection] Hailo worker stopped")
-
-
-def _raw_to_per_class_list(raw):
-    import numpy as np
-    raw = np.asarray(raw)
-    if raw.size == 0:
-        return []
-    if raw.ndim == 1:
-        raw = raw.reshape(1, -1)
-    if raw.shape[-1] >= 6:
-        max_cls = int(raw[:, 4].max()) + 1 if raw.shape[0] > 0 else 1
-        out = [[] for _ in range(max(80, max_cls))]
-        for i in range(raw.shape[0]):
-            row = raw[i]
-            cid = int(row[4])
-            score = float(row[5])
-            out[cid].append([float(row[0]), float(row[1]), float(row[2]), float(row[3]), score])
-        return [
-            np.array(x, dtype=np.float32) if len(x) else np.zeros((0, 5), dtype=np.float32)
-            for x in out
-        ]
-    return [raw]
 
 
 # ---------------------------------------------------------------------------
@@ -445,9 +488,9 @@ def _raw_to_per_class_list(raw):
 # ---------------------------------------------------------------------------
 
 async def _broadcast_detections():
-    with _latest_detections_lock:
-        data = list(_latest_detections)
-    msg = json.dumps({"type": "detections", "data": data})
+    with _current_gesture_lock:
+        gesture = _current_gesture
+    msg = json.dumps({"type": "gesture", "gesture": gesture})
     with _detection_ws_lock:
         conns = list(_detection_ws_set)
     for ws in conns:
