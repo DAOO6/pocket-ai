@@ -462,6 +462,17 @@ async def _dispatch_gesture(gesture_name: str):
         except Exception as e:
             logger.warning("[gesture_action] Capture failed: %s", e)
 
+    elif gesture_name == camera_stream.GESTURE_INDEX_FINGER:
+        # Submit — stop vosk listening and send what was heard
+        logger.info("[gesture_action] Submitting voice input")
+        ai.is_vosk_recording = False
+        ai._gesture_listening = False
+        for ws in list(_gesture_ws_clients):
+            try:
+                await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
+            except Exception:
+                pass
+
     elif gesture_name == camera_stream.GESTURE_CALL_ME:
         # Start a new conversation
         logger.info("[gesture_action] Starting new conversation")

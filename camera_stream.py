@@ -233,12 +233,13 @@ CONFIG_PATH = PROJECT_ROOT / "hailo_od" / "config.json"
 # ---------------------------------------------------------------------------
 
 # Gesture names (used for display label and action dispatch)
-GESTURE_OPEN_PALM   = "open_palm"
-GESTURE_THUMBS_UP   = "thumbs_up"
-GESTURE_FIST        = "fist"
-GESTURE_PEACE       = "peace"
-GESTURE_CALL_ME     = "call_me"
-GESTURE_NONE        = None
+GESTURE_OPEN_PALM    = "open_palm"
+GESTURE_THUMBS_UP    = "thumbs_up"
+GESTURE_FIST         = "fist"
+GESTURE_PEACE        = "peace"
+GESTURE_CALL_ME      = "call_me"
+GESTURE_INDEX_FINGER = "index_finger"
+GESTURE_NONE         = None
 
 GESTURE_HOLD_FRAMES   = 15   # ~1 second at ~15 fps detections
 GESTURE_COOLDOWN_SEC  = 3.0
@@ -298,17 +299,21 @@ def _classify_gesture(hand_landmarks):
     if thumb_up_geom and index_down and middle_down and ring_down and pinky_down:
         return GESTURE_THUMBS_UP
 
-    # Fist: all fingers curled, thumb alongside
-    if index_down and middle_down and ring_down and pinky_down:
-        return GESTURE_FIST
-
     # Peace / V sign: index + middle up, ring + pinky down
     if index_up and middle_up and ring_down and pinky_down:
         return GESTURE_PEACE
 
+    # Index finger only: index up, middle + ring + pinky down
+    if index_up and middle_down and ring_down and pinky_down:
+        return GESTURE_INDEX_FINGER
+
     # Call me: pinky + thumb extended, middle three down
     if pinky_up and index_down and middle_down and ring_down:
         return GESTURE_CALL_ME
+
+    # Fist: all fingers curled
+    if index_down and middle_down and ring_down and pinky_down:
+        return GESTURE_FIST
 
     return GESTURE_NONE
 
@@ -416,6 +421,8 @@ def _run_detection_worker():
             return GESTURE_THUMBS_UP
         if index_up and middle_up and ring_down and pinky_down:
             return GESTURE_PEACE
+        if index_up and middle_down and ring_down and pinky_down:
+            return GESTURE_INDEX_FINGER
         if pinky_up and index_down and middle_down and ring_down:
             return GESTURE_CALL_ME
         if index_down and middle_down and ring_down and pinky_down:

@@ -8,11 +8,12 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL, WS_BASE_URL } from '../config.js';
 
 const GESTURE_LABELS = {
-    open_palm:  { label: '✋ Open Palm',  color: '#00e5ff' },
-    thumbs_up:  { label: '👍 Thumbs Up',  color: '#00ff88' },
-    fist:       { label: '✊ Fist',        color: '#ff4444' },
-    peace:      { label: '✌️ Peace',       color: '#ffdd00' },
-    call_me:    { label: '🤙 Call Me',     color: '#cc88ff' },
+    open_palm:    { label: '✋ Open Palm',    color: '#00e5ff' },
+    thumbs_up:    { label: '👍 Thumbs Up',    color: '#00ff88' },
+    fist:         { label: '✊ Fist',          color: '#ff4444' },
+    peace:        { label: '✌️ Peace',         color: '#ffdd00' },
+    call_me:      { label: '🤙 Call Me',       color: '#cc88ff' },
+    index_finger: { label: '☝️ Submit',        color: '#ff9900' },
 };
 
 const MenuButton = ({ icon: Icon, label, onClick, color }) => (
@@ -48,24 +49,44 @@ export default function Home() {
     const [currentGesture, setCurrentGesture] = useState(null);
     const gestureWsRef = useRef(null);
     const cameraStarted = useRef(false);
+    const gestureLabelTimer = useRef(null);
 
-    // Start/stop camera and gesture detection in background
     const startGestureMode = useCallback(async () => {
         try {
             await fetch(`${API_BASE_URL}/camera/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
             await fetch(`${API_BASE_URL}/camera/detection/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
             cameraStarted.current = true;
             setGestureActive(true);
-            // Connect gesture WebSocket for labels
-            const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
-            gestureWsRef.current = ws;
-            ws.onmessage = (e) => {
-                try {
-                    const msg = JSON.parse(e.data);
-                    if (msg.type === 'gesture') setCurrentGesture(msg.gesture || null);
-                } catch {}
-            };
-            ws.onclose = () => setCurrentGesture(null);
+            // Small delay so backend WebSocket endpoint is ready
+            setTimeout(() => {
+                const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
+                gestureWsRef.current = ws;
+                ws.onmessage = (e) => {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.type === 'gesture') {
+                            const g = msg.gesture || null;
+                            setCurrentGesture(g);
+                            // Keep label visible for 1.5s after hand leaves frame
+                            if (g) {
+                                if (gestureLabelTimer.current) clearTimeout(gestureLabelTimer.current);
+                                gestureLabelTimer.current = null;
+                            } else {
+                                if (!gestureLabelTimer.current) {
+                                    gestureLabelTimer.current = setTimeout(() => {
+                                        setCurrentGesture(null);
+                                        gestureLabelTimer.current = null;
+                                    }, 1500);
+                                }
+                            }
+                        }
+                    } catch {}
+                };
+                ws.onclose = () => {
+                    setCurrentGesture(null);
+                };
+                ws.onerror = (e) => console.error('Gesture WS error:', e);
+            }, 500);
         } catch (e) {
             console.error('Gesture mode start failed:', e);
         }
@@ -74,6 +95,7 @@ export default function Home() {
     const stopGestureMode = useCallback(async () => {
         setGestureActive(false);
         setCurrentGesture(null);
+        if (gestureLabelTimer.current) { clearTimeout(gestureLabelTimer.current); gestureLabelTimer.current = null; }
         if (gestureWsRef.current) { gestureWsRef.current.close(); gestureWsRef.current = null; }
         if (cameraStarted.current) {
             await fetch(`${API_BASE_URL}/camera/detection/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
@@ -86,7 +108,6 @@ export default function Home() {
         if (gestureActive) stopGestureMode(); else startGestureMode();
     };
 
-    // Clean up on unmount
     useEffect(() => {
         return () => { stopGestureMode(); };
     }, []);
