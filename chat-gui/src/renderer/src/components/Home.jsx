@@ -1,10 +1,19 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Settings, Camera, Image as GalleryIcon, Code } from 'lucide-react';
+import { MessageCircle, Settings, Hand, Image as GalleryIcon, Code } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Avatar from './Avatar';
 import { useWebSocket } from '../contexts/WebSocketContext.jsx';
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
+import { API_BASE_URL, WS_BASE_URL } from '../config.js';
+
+const GESTURE_LABELS = {
+    open_palm:  { label: '✋ Open Palm',  color: '#00e5ff' },
+    thumbs_up:  { label: '👍 Thumbs Up',  color: '#00ff88' },
+    fist:       { label: '✊ Fist',        color: '#ff4444' },
+    peace:      { label: '✌️ Peace',       color: '#ffdd00' },
+    call_me:    { label: '🤙 Call Me',     color: '#cc88ff' },
+};
 
 const MenuButton = ({ icon: Icon, label, onClick, color }) => (
     <motion.button
@@ -35,6 +44,52 @@ export default function Home() {
 
     const [showBubble, setShowBubble] = useState(false);
     const bubbleTimeoutRef = useRef(null);
+    const [gestureActive, setGestureActive] = useState(false);
+    const [currentGesture, setCurrentGesture] = useState(null);
+    const gestureWsRef = useRef(null);
+    const cameraStarted = useRef(false);
+
+    // Start/stop camera and gesture detection in background
+    const startGestureMode = useCallback(async () => {
+        try {
+            await fetch(`${API_BASE_URL}/camera/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            await fetch(`${API_BASE_URL}/camera/detection/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            cameraStarted.current = true;
+            setGestureActive(true);
+            // Connect gesture WebSocket for labels
+            const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
+            gestureWsRef.current = ws;
+            ws.onmessage = (e) => {
+                try {
+                    const msg = JSON.parse(e.data);
+                    if (msg.type === 'gesture') setCurrentGesture(msg.gesture || null);
+                } catch {}
+            };
+            ws.onclose = () => setCurrentGesture(null);
+        } catch (e) {
+            console.error('Gesture mode start failed:', e);
+        }
+    }, []);
+
+    const stopGestureMode = useCallback(async () => {
+        setGestureActive(false);
+        setCurrentGesture(null);
+        if (gestureWsRef.current) { gestureWsRef.current.close(); gestureWsRef.current = null; }
+        if (cameraStarted.current) {
+            await fetch(`${API_BASE_URL}/camera/detection/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+            await fetch(`${API_BASE_URL}/camera/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+            cameraStarted.current = false;
+        }
+    }, []);
+
+    const toggleGestureMode = () => {
+        if (gestureActive) stopGestureMode(); else startGestureMode();
+    };
+
+    // Clean up on unmount
+    useEffect(() => {
+        return () => { stopGestureMode(); };
+    }, []);
 
     useEffect(() => {
         const active = isVoiceStreaming || voiceStatus === 'speaking';
@@ -167,10 +222,61 @@ export default function Home() {
                 </AnimatePresence>
             </div>
 
-            {/* Main Menu Grid - 4 buttons: Chat, Vision, Agent, Gallery */}
+            {/* Gesture indicator — shown when gesture mode is active */}
+            <AnimatePresence>
+                {gestureActive && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="absolute top-3 right-3 z-30 flex flex-col items-end gap-2 pointer-events-none"
+                    >
+                        {/* Active pill */}
+                        <div className="flex items-center gap-2 px-3 py-1 rounded-full border border-cyan-400/60 bg-cyan-400/10 backdrop-blur">
+                            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+                            <span className="text-[9px] font-['Press_Start_2P'] text-cyan-400">GESTURE ON</span>
+                        </div>
+                        {/* Current gesture label */}
+                        <AnimatePresence>
+                            {currentGesture && GESTURE_LABELS[currentGesture] && (
+                                <motion.div
+                                    key={currentGesture}
+                                    initial={{ opacity: 0, x: 10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: 10 }}
+                                    className="px-3 py-1 rounded-full border-2 backdrop-blur text-[9px] font-['Press_Start_2P']"
+                                    style={{
+                                        color: GESTURE_LABELS[currentGesture].color,
+                                        borderColor: GESTURE_LABELS[currentGesture].color,
+                                        backgroundColor: `${GESTURE_LABELS[currentGesture].color}22`,
+                                        boxShadow: `0 0 12px ${GESTURE_LABELS[currentGesture].color}44`,
+                                    }}
+                                >
+                                    {GESTURE_LABELS[currentGesture].label}
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Main Menu Grid */}
             <div className="grid grid-cols-2 grid-rows-[1fr_1fr] gap-3 z-10 w-full max-w-[520px] flex-1 min-h-0">
                 <MenuButton icon={MessageCircle} label="CHAT" onClick={() => navigate('/chat')} color="var(--pixel-primary)" />
-                <MenuButton icon={Camera} label="VISION" onClick={() => navigate('/camera')} color="var(--pixel-accent)" />
+                <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={toggleGestureMode}
+                    className="pixel-btn flex flex-col items-center justify-center gap-3 w-full min-h-[100px] flex-1 min-w-0"
+                    style={{
+                        borderColor: gestureActive ? '#00e5ff' : 'var(--pixel-accent)',
+                        color: gestureActive ? '#00e5ff' : 'var(--pixel-accent)',
+                        boxShadow: gestureActive ? '0 0 20px rgba(0,229,255,0.3)' : undefined,
+                    }}
+                >
+                    <Hand size={40} />
+                    <span className="text-sm">{gestureActive ? 'GESTURE ON' : 'GESTURE'}</span>
+                </motion.button>
                 <MenuButton icon={Code} label="AGENT" onClick={() => navigate('/tasks')} color="#f7768e" />
                 <MenuButton icon={GalleryIcon} label="GALLERY" onClick={() => navigate('/gallery')} color="var(--pixel-secondary)" />
             </div>

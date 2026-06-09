@@ -390,6 +390,9 @@ ai = AIState()
 # Gesture action handler — called by camera_stream gesture worker
 # ---------------------------------------------------------------------------
 
+# Set of connected voice WebSocket clients that gesture commands are forwarded to
+_gesture_ws_clients = set()
+
 def _handle_gesture(gesture_name: str):
     """
     Called from the gesture worker thread when a gesture fires.
@@ -407,24 +410,26 @@ async def _dispatch_gesture(gesture_name: str):
     logger.info("[gesture_action] Dispatching: %s", gesture_name)
 
     if gesture_name == camera_stream.GESTURE_OPEN_PALM:
-        # Play preloaded greeting instantly
+        # Play preloaded greeting instantly using cached audio array
         ai.tts.clear_queue()
-        ai.tts._queue.put(ai._greeting_audio if hasattr(ai, "_greeting_audio") else "Good day, sir.")
-        # If _greeting_audio is a pre-synthesised array, play directly
         if hasattr(ai, "_greeting_audio_array") and ai._greeting_audio_array is not None:
             import sounddevice as sd
-            import numpy as np
             sd.stop()
-            silence = np.zeros(int(22050 * 0.3), dtype=np.int16)
-            audio = np.concatenate([ai._greeting_audio_array, silence])
-            sd.play(audio, samplerate=22050)
+            ai.tts._queue.put("Good day, sir.")
         else:
             ai.tts.speak("Good day, sir.")
 
     elif gesture_name == camera_stream.GESTURE_THUMBS_UP:
-        # Start voice listening — send start_vosk command via internal flag
+        # Start voice listening
         logger.info("[gesture_action] Starting voice listening")
+        ai._gesture_listening = True
         ai.is_vosk_recording = True
+        # Notify any connected voice WebSocket clients to start vosk
+        for ws in list(_gesture_ws_clients):
+            try:
+                await ws.send_json({"type": "gesture_command", "command": "start_vosk"})
+            except Exception:
+                pass
 
     elif gesture_name == camera_stream.GESTURE_FIST:
         # Stop TTS immediately and stop voice listening
@@ -437,6 +442,13 @@ async def _dispatch_gesture(gesture_name: str):
             pass
         ai.is_vosk_recording = False
         ai.is_recording = False
+        ai._gesture_listening = False
+        # Tell voice clients to stop vosk
+        for ws in list(_gesture_ws_clients):
+            try:
+                await ws.send_json({"type": "gesture_command", "command": "stop_vosk"})
+            except Exception:
+                pass
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
         # Take a camera capture
@@ -630,7 +642,8 @@ async def chat_websocket_endpoint(websocket: WebSocket, conv_id: str):
 async def voice_websocket(websocket: WebSocket):
     await websocket.accept()
     logger.info("Voice client connected")
-    
+    _gesture_ws_clients.add(websocket)
+
     abort_event = asyncio.Event()
     message_queue = asyncio.Queue()
 
@@ -774,6 +787,7 @@ async def voice_websocket(websocket: WebSocket):
         import traceback
         traceback.print_exc()
     finally:
+        _gesture_ws_clients.discard(websocket)
         receive_task.cancel()
 
 

@@ -3,7 +3,6 @@ import { HashRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import Home from './components/Home';
 import ChatInterface from './components/ChatInterface';
-import CameraView from './components/CameraView';
 import Gallery from './components/Gallery';
 import Settings from './components/Settings';
 import StatusBar from './components/StatusBar';
@@ -34,11 +33,7 @@ const AnimatedRoutes = () => {
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
         <Route path="/" element={<Home />} />
-        <Route
-          path="/chat"
-          element={<ChatInterface />}
-        />
-        <Route path="/camera" element={<CameraView />} />
+        <Route path="/chat" element={<ChatInterface />} />
         <Route path="/gallery" element={<Gallery />} />
         <Route path="/tasks" element={<TaskManager />} />
         <Route path="/tasks/add" element={<TaskAdd />} />
