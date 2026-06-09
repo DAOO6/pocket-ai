@@ -420,11 +420,8 @@ async def _dispatch_gesture(gesture_name: str):
             ai.tts.speak("Good day, sir.")
 
     elif gesture_name == camera_stream.GESTURE_THUMBS_UP:
-        # Start voice listening
+        # Start voice listening — send gesture_command to all connected voice WS clients
         logger.info("[gesture_action] Starting voice listening")
-        ai._gesture_listening = True
-        ai.is_vosk_recording = True
-        # Notify any connected voice WebSocket clients to start vosk
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "start_vosk"})
@@ -440,10 +437,6 @@ async def _dispatch_gesture(gesture_name: str):
             sd.stop()
         except Exception:
             pass
-        ai.is_vosk_recording = False
-        ai.is_recording = False
-        ai._gesture_listening = False
-        # Tell voice clients to stop vosk
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "stop_vosk"})
@@ -463,10 +456,8 @@ async def _dispatch_gesture(gesture_name: str):
             logger.warning("[gesture_action] Capture failed: %s", e)
 
     elif gesture_name == camera_stream.GESTURE_INDEX_FINGER:
-        # Submit — stop vosk listening and send what was heard
+        # Submit — stop listening and process what was heard
         logger.info("[gesture_action] Submitting voice input")
-        ai.is_vosk_recording = False
-        ai._gesture_listening = False
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})

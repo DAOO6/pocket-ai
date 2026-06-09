@@ -134,6 +134,28 @@ export function WebSocketProvider({ children }) {
                 setVoiceStreamText((prev) => prev + ' [aborted]');
                 setTimeout(() => setIsVoiceStreaming(false), 2000);
                 break;
+            case 'gesture_command':
+                // Commands fired by backend gesture worker via voice WebSocket
+                if (data.command === 'start_vosk') {
+                    setIsVoskRecording(true);
+                    setVoskText('');
+                    // Send start_vosk to the backend via the same voice WS
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'start_vosk', transcription_only: false }));
+                    }
+                } else if (data.command === 'stop_vosk') {
+                    setIsVoskRecording(false);
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'stop_vosk' }));
+                    }
+                } else if (data.command === 'submit_vosk') {
+                    // Stop listening and let backend process what was heard
+                    setIsVoskRecording(false);
+                    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'stop_vosk' }));
+                    }
+                }
+                break;
             default:
                 break;
         }

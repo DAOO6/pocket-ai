@@ -47,59 +47,85 @@ export default function Home() {
     const bubbleTimeoutRef = useRef(null);
     const [gestureActive, setGestureActive] = useState(false);
     const [currentGesture, setCurrentGesture] = useState(null);
-    const gestureWsRef = useRef(null);
     const cameraStarted = useRef(false);
     const gestureLabelTimer = useRef(null);
+    const gestureDetectionWsRef = useRef(null);
+
+    // Listen for gesture labels via the detections WebSocket
+    const connectGestureWs = useCallback(() => {
+        if (gestureDetectionWsRef.current) return;
+        const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
+        gestureDetectionWsRef.current = ws;
+        ws.onmessage = (e) => {
+            try {
+                const msg = JSON.parse(e.data);
+                if (msg.type === 'gesture') {
+                    const g = msg.gesture || null;
+                    if (g) {
+                        // Gesture detected — show label immediately
+                        if (gestureLabelTimer.current) {
+                            clearTimeout(gestureLabelTimer.current);
+                            gestureLabelTimer.current = null;
+                        }
+                        setCurrentGesture(g);
+                    } else {
+                        // No gesture — keep label visible for 1.5s then clear
+                        if (!gestureLabelTimer.current) {
+                            gestureLabelTimer.current = setTimeout(() => {
+                                setCurrentGesture(null);
+                                gestureLabelTimer.current = null;
+                            }, 1500);
+                        }
+                    }
+                }
+            } catch {}
+        };
+        ws.onclose = () => {
+            gestureDetectionWsRef.current = null;
+            setCurrentGesture(null);
+        };
+        ws.onerror = () => {
+            gestureDetectionWsRef.current = null;
+        };
+    }, []);
 
     const startGestureMode = useCallback(async () => {
         try {
-            await fetch(`${API_BASE_URL}/camera/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-            await fetch(`${API_BASE_URL}/camera/detection/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            await fetch(`${API_BASE_URL}/camera/start`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+            });
+            // Wait for camera to initialise before starting detection
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            await fetch(`${API_BASE_URL}/camera/detection/start`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+            });
             cameraStarted.current = true;
             setGestureActive(true);
-            // Small delay so backend WebSocket endpoint is ready
-            setTimeout(() => {
-                const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
-                gestureWsRef.current = ws;
-                ws.onmessage = (e) => {
-                    try {
-                        const msg = JSON.parse(e.data);
-                        if (msg.type === 'gesture') {
-                            const g = msg.gesture || null;
-                            setCurrentGesture(g);
-                            // Keep label visible for 1.5s after hand leaves frame
-                            if (g) {
-                                if (gestureLabelTimer.current) clearTimeout(gestureLabelTimer.current);
-                                gestureLabelTimer.current = null;
-                            } else {
-                                if (!gestureLabelTimer.current) {
-                                    gestureLabelTimer.current = setTimeout(() => {
-                                        setCurrentGesture(null);
-                                        gestureLabelTimer.current = null;
-                                    }, 1500);
-                                }
-                            }
-                        }
-                    } catch {}
-                };
-                ws.onclose = () => {
-                    setCurrentGesture(null);
-                };
-                ws.onerror = (e) => console.error('Gesture WS error:', e);
-            }, 500);
+            // Connect detections WebSocket after a short delay
+            setTimeout(connectGestureWs, 500);
         } catch (e) {
             console.error('Gesture mode start failed:', e);
         }
-    }, []);
+    }, [connectGestureWs]);
 
     const stopGestureMode = useCallback(async () => {
         setGestureActive(false);
         setCurrentGesture(null);
-        if (gestureLabelTimer.current) { clearTimeout(gestureLabelTimer.current); gestureLabelTimer.current = null; }
-        if (gestureWsRef.current) { gestureWsRef.current.close(); gestureWsRef.current = null; }
+        if (gestureLabelTimer.current) {
+            clearTimeout(gestureLabelTimer.current);
+            gestureLabelTimer.current = null;
+        }
+        if (gestureDetectionWsRef.current) {
+            gestureDetectionWsRef.current.close();
+            gestureDetectionWsRef.current = null;
+        }
         if (cameraStarted.current) {
-            await fetch(`${API_BASE_URL}/camera/detection/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
-            await fetch(`${API_BASE_URL}/camera/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+            await fetch(`${API_BASE_URL}/camera/detection/stop`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+            }).catch(() => {});
+            await fetch(`${API_BASE_URL}/camera/stop`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+            }).catch(() => {});
             cameraStarted.current = false;
         }
     }, []);
