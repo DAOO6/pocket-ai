@@ -5,15 +5,15 @@ import { useNavigate } from 'react-router-dom';
 import Avatar from './Avatar';
 import { useWebSocket } from '../contexts/WebSocketContext.jsx';
 import { useRef, useState, useEffect, useCallback } from 'react';
-import { API_BASE_URL, WS_BASE_URL } from '../config.js';
+import { API_BASE_URL } from '../config.js';
 
 const GESTURE_LABELS = {
-    open_palm:    { label: '✋ Open Palm',    color: '#00e5ff' },
-    thumbs_up:    { label: '👍 Thumbs Up',    color: '#00ff88' },
-    fist:         { label: '✊ Fist',          color: '#ff4444' },
-    peace:        { label: '✌️ Peace',         color: '#ffdd00' },
-    call_me:      { label: '🤙 Call Me',       color: '#cc88ff' },
-    index_finger: { label: '☝️ Submit',        color: '#ff9900' },
+    open_palm:    { label: '✋ Open Palm',      color: '#00e5ff' },
+    thumbs_up:    { label: '👍 Thumbs Up',      color: '#00ff88' },
+    four_fingers: { label: '🖐️ Four Fingers',   color: '#ff4444' },
+    peace:        { label: '✌️ Peace',           color: '#ffdd00' },
+    call_me:      { label: '🤙 Call Me',         color: '#cc88ff' },
+    index_finger: { label: '☝️ Submit',          color: '#ff9900' },
 };
 
 const MenuButton = ({ icon: Icon, label, onClick, color }) => (
@@ -48,45 +48,31 @@ export default function Home() {
     const [gestureActive, setGestureActive] = useState(false);
     const [currentGesture, setCurrentGesture] = useState(null);
     const cameraStarted = useRef(false);
-    const gestureLabelTimer = useRef(null);
-    const gestureDetectionWsRef = useRef(null);
+    const pollTimerRef = useRef(null);
 
-    // Listen for gesture labels via the detections WebSocket
-    const connectGestureWs = useCallback(() => {
-        if (gestureDetectionWsRef.current) return;
-        const ws = new WebSocket(`${WS_BASE_URL}/ws/detections`);
-        gestureDetectionWsRef.current = ws;
-        ws.onmessage = (e) => {
+    const startPolling = useCallback(() => {
+        if (pollTimerRef.current) return;
+        const poll = async () => {
             try {
-                const msg = JSON.parse(e.data);
-                if (msg.type === 'gesture') {
-                    const g = msg.gesture || null;
-                    if (g) {
-                        // Gesture detected — show label immediately
-                        if (gestureLabelTimer.current) {
-                            clearTimeout(gestureLabelTimer.current);
-                            gestureLabelTimer.current = null;
-                        }
-                        setCurrentGesture(g);
-                    } else {
-                        // No gesture — keep label visible for 1.5s then clear
-                        if (!gestureLabelTimer.current) {
-                            gestureLabelTimer.current = setTimeout(() => {
-                                setCurrentGesture(null);
-                                gestureLabelTimer.current = null;
-                            }, 1500);
-                        }
-                    }
+                const res = await fetch(`${API_BASE_URL}/camera/gesture`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setCurrentGesture(data.gesture || null);
                 }
             } catch {}
+            if (pollTimerRef.current !== null) {
+                pollTimerRef.current = setTimeout(poll, 300);
+            }
         };
-        ws.onclose = () => {
-            gestureDetectionWsRef.current = null;
-            setCurrentGesture(null);
-        };
-        ws.onerror = () => {
-            gestureDetectionWsRef.current = null;
-        };
+        pollTimerRef.current = setTimeout(poll, 300);
+    }, []);
+
+    const stopPolling = useCallback(() => {
+        if (pollTimerRef.current) {
+            clearTimeout(pollTimerRef.current);
+            pollTimerRef.current = null;
+        }
+        setCurrentGesture(null);
     }, []);
 
     const startGestureMode = useCallback(async () => {
@@ -94,31 +80,21 @@ export default function Home() {
             await fetch(`${API_BASE_URL}/camera/start`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
             });
-            // Wait for camera to initialise before starting detection
             await new Promise(resolve => setTimeout(resolve, 1000));
             await fetch(`${API_BASE_URL}/camera/detection/start`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
             });
             cameraStarted.current = true;
             setGestureActive(true);
-            // Connect detections WebSocket after a short delay
-            setTimeout(connectGestureWs, 500);
+            startPolling();
         } catch (e) {
             console.error('Gesture mode start failed:', e);
         }
-    }, [connectGestureWs]);
+    }, [startPolling]);
 
     const stopGestureMode = useCallback(async () => {
         setGestureActive(false);
-        setCurrentGesture(null);
-        if (gestureLabelTimer.current) {
-            clearTimeout(gestureLabelTimer.current);
-            gestureLabelTimer.current = null;
-        }
-        if (gestureDetectionWsRef.current) {
-            gestureDetectionWsRef.current.close();
-            gestureDetectionWsRef.current = null;
-        }
+        stopPolling();
         if (cameraStarted.current) {
             await fetch(`${API_BASE_URL}/camera/detection/stop`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
@@ -128,7 +104,7 @@ export default function Home() {
             }).catch(() => {});
             cameraStarted.current = false;
         }
-    }, []);
+    }, [stopPolling]);
 
     const toggleGestureMode = () => {
         if (gestureActive) stopGestureMode(); else startGestureMode();
@@ -137,6 +113,7 @@ export default function Home() {
     useEffect(() => {
         return () => { stopGestureMode(); };
     }, []);
+
 
     useEffect(() => {
         const active = isVoiceStreaming || voiceStatus === 'speaking';
