@@ -26,6 +26,7 @@ class STTEngine:
         self.model = None
         self.recognizer = None
         self.listening = False
+        self.muted = False          # True while Jarvis is speaking — discards mic input
         self.audio_queue = queue.Queue()
         self.thread = None
         self.stream = None
@@ -83,7 +84,7 @@ class STTEngine:
 
     def _mic_callback(self, in_data, frame_count, time_info, status):
         """Puts live audio frames into a queue for the background thread."""
-        if self.listening:
+        if self.listening and not self.muted:
             self.audio_queue.put(in_data)
         return (None, pyaudio.paContinue)
 

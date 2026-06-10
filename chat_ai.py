@@ -400,9 +400,13 @@ def _play_gesture_audio(ai_state, attr: str, fallback: str):
         try:
             import sounddevice as sd
             sd.stop()
+            ai_state.tts._mute_stt()
             sd.play(audio, samplerate=22050)
+            sd.wait()
+            ai_state.tts._unmute_stt()
             return
         except Exception as e:
+            ai_state.tts._unmute_stt()
             logger.warning("Could not play preloaded audio: %s", e)
     ai_state.tts.speak(fallback)
 
@@ -444,12 +448,14 @@ async def _dispatch_gesture(gesture_name: str):
             sd.stop()
         except Exception:
             pass
+        # Play "let me think about that" before sending so it plays before response
+        _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
             except Exception:
                 pass
-        _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
+
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
         # Take a camera capture
@@ -814,6 +820,10 @@ import asyncio as _asyncio
 async def _startup_tasks():
     _preload_greeting(ai.tts)
     _register_gesture_callback(_asyncio.get_running_loop())
+    # Register STT engines so TTS can mute them during playback
+    ai.tts.register_stt_engine(ai.stt)
+    ai.tts.register_stt_engine(ai.vosk)
+    logger.info("STT engines registered with TTS for muting.")
 
 # Register as a router startup event so it runs after the server starts
 @router.on_event("startup")

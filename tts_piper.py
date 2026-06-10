@@ -46,8 +46,27 @@ class PocketAudio:
 
         self._queue = queue.Queue()
         self._queue_drained_callback = None
+        self._stt_engines = []   # STT engines to mute while speaking
         self._worker = threading.Thread(target=self._queue_worker, daemon=True)
         self._worker.start()
+
+    def register_stt_engine(self, engine):
+        """Register an STT engine to be muted during TTS playback."""
+        self._stt_engines.append(engine)
+
+    def _mute_stt(self):
+        for engine in self._stt_engines:
+            try:
+                engine.muted = True
+            except Exception:
+                pass
+
+    def _unmute_stt(self):
+        for engine in self._stt_engines:
+            try:
+                engine.muted = False
+            except Exception:
+                pass
 
     def _ensure_models_exist(self, name):
         if not os.path.exists(self.model_dir):
@@ -143,6 +162,7 @@ class PocketAudio:
                     continue
 
                 # Start playback
+                self._mute_stt()
                 sd.play(current_audio, samplerate=22050)
 
                 # While playing, pre-synthesise the next sentence if one is queued
@@ -156,6 +176,7 @@ class PocketAudio:
 
                 # Wait for playback to finish
                 sd.wait()
+                self._unmute_stt()
 
                 # Check if queue is now drained
                 if next_audio is None and self._queue.empty() and self._queue_drained_callback:

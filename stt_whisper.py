@@ -21,6 +21,7 @@ class STTEngine:
     def __init__(self):
         self.model = None
         self.listening = False
+        self.muted = False          # True while Jarvis is speaking — discards mic input
         self.audio_queue = queue.Queue()
         self.result_queue = queue.Queue() # For passing text back to main thread
         self.thread = None
@@ -38,7 +39,7 @@ class STTEngine:
             print("Whisper model loaded.")
 
     def _mic_callback(self, in_data, frame_count, time_info, status):
-        if self.listening:
+        if self.listening and not self.muted:
             self.audio_queue.put(in_data)
         return (None, pyaudio.paContinue)
 
@@ -193,7 +194,7 @@ class STTEngine:
         print("Capture Started")
 
     def _capture_callback(self, in_data, frame_count, time_info, status):
-        if self.listening:
+        if self.listening and not self.muted:
             self.audio_frames.append(in_data)
         return (None, pyaudio.paContinue)
 
