@@ -428,7 +428,7 @@ async def _dispatch_gesture(gesture_name: str):
             except Exception:
                 pass
 
-    elif gesture_name == camera_stream.GESTURE_FOUR_FINGERS:
+    elif gesture_name == camera_stream.GESTURE_PEACE:
         # Stop TTS immediately and stop voice listening
         logger.info("[gesture_action] Stopping TTS and voice listening")
         ai.tts.clear_queue()
