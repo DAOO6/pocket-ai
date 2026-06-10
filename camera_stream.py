@@ -235,10 +235,9 @@ CONFIG_PATH = PROJECT_ROOT / "hailo_od" / "config.json"
 # Gesture names (used for display label and action dispatch)
 GESTURE_OPEN_PALM    = "open_palm"
 GESTURE_THUMBS_UP    = "thumbs_up"
-GESTURE_FOUR_FINGERS = "four_fingers"
+
 GESTURE_PEACE        = "peace"
 GESTURE_CALL_ME      = "call_me"
-GESTURE_INDEX_FINGER = "index_finger"
 GESTURE_NONE         = None
 
 GESTURE_HOLD_FRAMES   = 15   # ~1 second at ~15 fps detections
@@ -299,21 +298,13 @@ def _classify_gesture(hand_landmarks):
     if thumb_up_geom and index_down and middle_down and ring_down and pinky_down:
         return GESTURE_THUMBS_UP
 
-    # Peace / V sign: index + middle up, ring + pinky down
+    # Peace / V sign: index + middle up, ring + pinky down — STOP action
     if index_up and middle_up and ring_down and pinky_down:
         return GESTURE_PEACE
-
-    # Index finger only: index up, middle + ring + pinky down
-    if index_up and middle_down and ring_down and pinky_down:
-        return GESTURE_INDEX_FINGER
 
     # Call me: pinky + thumb extended, middle three down
     if pinky_up and index_down and middle_down and ring_down:
         return GESTURE_CALL_ME
-
-    # Four fingers: index + middle + ring + pinky up, thumb tucked
-    if index_up and middle_up and ring_up and pinky_up and not thumb_up_geom:
-        return GESTURE_FOUR_FINGERS
 
     return GESTURE_NONE
 
@@ -421,13 +412,8 @@ def _run_detection_worker():
             return GESTURE_THUMBS_UP
         if index_up and middle_up and ring_down and pinky_down:
             return GESTURE_PEACE
-        if index_up and middle_down and ring_down and pinky_down:
-            return GESTURE_INDEX_FINGER
         if pinky_up and index_down and middle_down and ring_down:
             return GESTURE_CALL_ME
-        # Four fingers: four fingers up, thumb tucked (thumb tip below thumb IP = not up)
-        if index_up and middle_up and ring_up and pinky_up and not thumb_up:
-            return GESTURE_FOUR_FINGERS
         return GESTURE_NONE
 
     try:

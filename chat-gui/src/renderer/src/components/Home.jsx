@@ -10,8 +10,7 @@ import { API_BASE_URL } from '../config.js';
 const GESTURE_LABELS = {
     open_palm:    { label: '✋ Open Palm',    color: '#00e5ff' },
     thumbs_up:    { label: '👍 Thumbs Up',    color: '#00ff88' },
-    peace:        { label: '✌️ Stop',          color: '#ff4444' },
-    index_finger: { label: '☝️ Submit',        color: '#ff9900' },
+    peace:        { label: '✌️ Stop + Send',   color: '#ff4444' },
     call_me:      { label: '🤙 Call Me',       color: '#cc88ff' },
 };
 

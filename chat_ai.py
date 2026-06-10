@@ -393,6 +393,20 @@ ai = AIState()
 # Set of connected voice WebSocket clients that gesture commands are forwarded to
 _gesture_ws_clients = set()
 
+def _play_gesture_audio(ai_state, attr: str, fallback: str):
+    """Play a preloaded gesture audio array instantly, or fall back to TTS."""
+    audio = getattr(ai_state, attr, None)
+    if audio is not None:
+        try:
+            import sounddevice as sd
+            sd.stop()
+            sd.play(audio, samplerate=22050)
+            return
+        except Exception as e:
+            logger.warning("Could not play preloaded audio: %s", e)
+    ai_state.tts.speak(fallback)
+
+
 def _handle_gesture(gesture_name: str):
     """
     Called from the gesture worker thread when a gesture fires.
@@ -410,18 +424,12 @@ async def _dispatch_gesture(gesture_name: str):
     logger.info("[gesture_action] Dispatching: %s", gesture_name)
 
     if gesture_name == camera_stream.GESTURE_OPEN_PALM:
-        # Play preloaded greeting instantly using cached audio array
         ai.tts.clear_queue()
-        if hasattr(ai, "_greeting_audio_array") and ai._greeting_audio_array is not None:
-            import sounddevice as sd
-            sd.stop()
-            ai.tts._queue.put("Good day, sir.")
-        else:
-            ai.tts.speak("Good day, sir.")
+        _play_gesture_audio(ai, "_greeting_audio_array", "Good day, sir.")
 
     elif gesture_name == camera_stream.GESTURE_THUMBS_UP:
-        # Start voice listening — send gesture_command to all connected voice WS clients
         logger.info("[gesture_action] Starting voice listening")
+        _play_gesture_audio(ai, "_thumbsup_audio_array", "Yes, sir?")
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "start_vosk"})
@@ -429,7 +437,6 @@ async def _dispatch_gesture(gesture_name: str):
                 pass
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
-        # Stop TTS immediately and stop voice listening
         logger.info("[gesture_action] Stopping TTS and voice listening")
         ai.tts.clear_queue()
         try:
@@ -439,9 +446,10 @@ async def _dispatch_gesture(gesture_name: str):
             pass
         for ws in list(_gesture_ws_clients):
             try:
-                await ws.send_json({"type": "gesture_command", "command": "stop_vosk"})
+                await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
             except Exception:
                 pass
+        _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
         # Take a camera capture
@@ -455,20 +463,10 @@ async def _dispatch_gesture(gesture_name: str):
         except Exception as e:
             logger.warning("[gesture_action] Capture failed: %s", e)
 
-    elif gesture_name == camera_stream.GESTURE_INDEX_FINGER:
-        # Submit — stop listening and process what was heard
-        logger.info("[gesture_action] Submitting voice input")
-        for ws in list(_gesture_ws_clients):
-            try:
-                await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
-            except Exception:
-                pass
-
     elif gesture_name == camera_stream.GESTURE_CALL_ME:
-        # Start a new conversation
         logger.info("[gesture_action] Starting new conversation")
         ai.conv_manager.create_conversation(title="Gesture — New Chat")
-        ai.tts.speak("New conversation started, sir.")
+        _play_gesture_audio(ai, "_callme_audio_array", "Starting a new conversation, sir.")
 
 
 def _register_gesture_callback(loop):
@@ -483,15 +481,21 @@ def _register_gesture_callback(loop):
 
 
 def _preload_greeting(tts: PocketAudio):
-    """Pre-synthesise the greeting audio at startup so open_palm plays instantly."""
-    try:
-        import numpy as np
-        audio = tts._synthesise_to_array("Good day, sir.")
-        ai._greeting_audio_array = audio
-        logger.info("Greeting audio preloaded.")
-    except Exception as e:
-        ai._greeting_audio_array = None
-        logger.warning("Could not preload greeting: %s", e)
+    """Pre-synthesise all gesture audio at startup so gestures play instantly."""
+    GESTURE_PHRASES = {
+        "_greeting_audio_array":  "Good day, sir.",
+        "_thumbsup_audio_array":  "Yes, sir?",
+        "_peace_audio_array":     "Let me think about that...",
+        "_callme_audio_array":    "Starting a new conversation, sir.",
+    }
+    for attr, phrase in GESTURE_PHRASES.items():
+        try:
+            audio = tts._synthesise_to_array(phrase)
+            setattr(ai, attr, audio)
+            logger.info("Preloaded audio: %s", phrase)
+        except Exception as e:
+            setattr(ai, attr, None)
+            logger.warning("Could not preload '%s': %s", phrase, e)
 
 
 @router.get("/conversations")
