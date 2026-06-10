@@ -448,8 +448,6 @@ async def _dispatch_gesture(gesture_name: str):
             sd.stop()
         except Exception:
             pass
-        # Play "let me think about that" before sending so it plays before response
-        _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
@@ -699,6 +697,7 @@ async def voice_websocket(websocket: WebSocket):
                             await websocket.send_json({"type": "voice_status", "status": "idle"})
                         else:
                             await websocket.send_json({"type": "voice_status", "status": "thinking"})
+                            _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
                             await ai.ai_response_and_speak(websocket, text, abort_event, message_queue)
                     else:
                         await websocket.send_json({"type": "voice_status", "status": "idle"})
@@ -722,6 +721,7 @@ async def voice_websocket(websocket: WebSocket):
                         if transcription_only:
                             await websocket.send_json({"type": "voice_status", "status": "idle"})
                         else:
+                            _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
                             await ai.ai_response_and_speak(websocket, text, abort_event, message_queue)
                     else:
                         await websocket.send_json({"type": "voice_status", "status": "idle"})
