@@ -168,7 +168,7 @@ class AIState:
                 "You are Jarvis, Tony Stark's AI assistant. "
                 "Rules you must always follow: "
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
-                "2. CRITICAL: Maximum 2 sentences per response. Never more. If you need more, summarise instead. "
+                "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
                 "4. Occasionally use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
@@ -208,7 +208,7 @@ class AIState:
                 "You are Jarvis, Tony Stark's AI assistant. "
                 "Rules you must always follow: "
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
-                "2. CRITICAL: Maximum 2 sentences per response. Never more. If you need more, summarise instead. "
+                "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
                 "4. Occasionally use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
@@ -223,7 +223,7 @@ class AIState:
             "options": {
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "num_predict": 200,
+                "num_predict": 512,
             }
         }).encode("utf-8")
 
@@ -428,10 +428,12 @@ async def _dispatch_gesture(gesture_name: str):
     logger.info("[gesture_action] Dispatching: %s", gesture_name)
 
     if gesture_name == camera_stream.GESTURE_OPEN_PALM:
+        # Open palm: clear TTS and play greeting
         ai.tts.clear_queue()
         _play_gesture_audio(ai, "_greeting_audio_array", "Good day, sir.")
 
     elif gesture_name == camera_stream.GESTURE_THUMBS_UP:
+        # Thumbs up: start listening for voice input
         logger.info("[gesture_action] Starting voice listening")
         _play_gesture_audio(ai, "_thumbsup_audio_array", "Yes, sir?")
         for ws in list(_gesture_ws_clients):
@@ -441,27 +443,28 @@ async def _dispatch_gesture(gesture_name: str):
                 pass
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
-        logger.info("[gesture_action] Stopping TTS and voice listening")
-        # Clear queue first so no more sentences are picked up after sd.stop()
-        ai.tts.clear_queue()
-        try:
-            import sounddevice as sd
-            sd.stop()
-        except Exception:
-            pass
-        # Also unmute STT immediately since we stopped mid-speech
-        ai.tts._unmute_stt()
+        # Peace sign: submit voice input to AI — no skip/abort here
+        logger.info("[gesture_action] Submitting voice input")
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
             except Exception:
                 pass
 
-
     elif gesture_name == camera_stream.GESTURE_CALL_ME:
-        logger.info("[gesture_action] Starting new conversation")
-        ai.conv_manager.create_conversation(title="Gesture — New Chat")
-        _play_gesture_audio(ai, "_callme_audio_array", "Starting a new conversation, sir.")
+        # Call me: skip/abort current TTS output
+        logger.info("[gesture_action] Skipping TTS output")
+        ai.tts.clear_queue()
+        try:
+            import sounddevice as sd
+            sd.stop()
+        except Exception:
+            pass
+        for ws in list(_gesture_ws_clients):
+            try:
+                await ws.send_json({"type": "gesture_command", "command": "abort"})
+            except Exception:
+                pass
 
 
 def _register_gesture_callback(loop):
@@ -481,7 +484,7 @@ def _preload_greeting(tts: PocketAudio):
         "_greeting_audio_array":  "Good day, sir.",
         "_thumbsup_audio_array":  "Yes, sir?",
         "_peace_audio_array":     "Let me think about that...",
-        "_callme_audio_array":    "Starting a new conversation, sir.",
+        "_callme_audio_array":    "Understood, sir.",
     }
     for attr, phrase in GESTURE_PHRASES.items():
         try:
@@ -692,6 +695,23 @@ async def voice_websocket(websocket: WebSocket):
                             await ai.ai_response_and_speak(websocket, text, abort_event, message_queue)
                     else:
                         await websocket.send_json({"type": "voice_status", "status": "idle"})
+
+            elif command == "submit_vosk":
+                # Gesture-triggered submit: stop listening and send to AI (same as stop_vosk but gesture-initiated)
+                if ai.is_vosk_recording:
+                    ai.is_vosk_recording = False
+                    logger.debug("Gesture submit: stopping Vosk...")
+                    text = ai.vosk.stop_listening()
+                    logger.debug("Vosk Final Text (gesture submit): %s", text)
+                    if text:
+                        await websocket.send_json({"type": "vosk_final", "text": text})
+                        await websocket.send_json({"type": "voice_status", "status": "thinking"})
+                        _play_gesture_audio(ai, "_peace_audio_array", "Let me think about that...")
+                        await ai.ai_response_and_speak(websocket, text, abort_event, message_queue)
+                    else:
+                        await websocket.send_json({"type": "voice_status", "status": "idle"})
+                else:
+                    logger.debug("submit_vosk received but not currently recording — ignoring.")
 
             elif command == "toggle_voice":
                 if not ai.is_recording:
