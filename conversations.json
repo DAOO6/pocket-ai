@@ -190,18 +190,6 @@
     "updated_at": 1780844284.7901847
   },
   {
-    "id": "9ee0a30c-80dd-4d23-a1d7-af2a5d37a4e4",
-    "title": "New Chat",
-    "messages": [],
-    "updated_at": 1780844309.2707736
-  },
-  {
-    "id": "b16a35b2-fafd-4da5-a4da-07d2a55b770f",
-    "title": "Gesture \u2014 New Chat",
-    "messages": [],
-    "updated_at": 1780997195.66344
-  },
-  {
     "id": "e71aad25-eb69-4d92-a690-613244673314",
     "title": "if i sent you code in here, wo...",
     "messages": [
@@ -267,11 +255,5 @@
       }
     ],
     "updated_at": 1781113422.773207
-  },
-  {
-    "id": "18363ee5-0fec-452a-8654-707d96ba70fe",
-    "title": "Gesture \u2014 New Chat",
-    "messages": [],
-    "updated_at": 1781115732.8756876
   }
 ]

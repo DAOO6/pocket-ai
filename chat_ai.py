@@ -168,7 +168,7 @@ class AIState:
                 "You are Jarvis, Tony Stark's AI assistant. "
                 "Rules you must always follow: "
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
-                "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
+                "2. CRITICAL: Maximum 2 sentences per response. Never more. If you need more, summarise instead. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
                 "4. Occasionally use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
@@ -208,7 +208,7 @@ class AIState:
                 "You are Jarvis, Tony Stark's AI assistant. "
                 "Rules you must always follow: "
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
-                "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
+                "2. CRITICAL: Maximum 2 sentences per response. Never more. If you need more, summarise instead. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
                 "4. Occasionally use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
@@ -223,7 +223,7 @@ class AIState:
             "options": {
                 "temperature": 0.7,
                 "top_p": 0.9,
-                "num_predict": 512,
+                "num_predict": 200,
             }
         }).encode("utf-8")
 
@@ -442,30 +442,21 @@ async def _dispatch_gesture(gesture_name: str):
 
     elif gesture_name == camera_stream.GESTURE_PEACE:
         logger.info("[gesture_action] Stopping TTS and voice listening")
+        # Clear queue first so no more sentences are picked up after sd.stop()
         ai.tts.clear_queue()
         try:
             import sounddevice as sd
             sd.stop()
         except Exception:
             pass
+        # Also unmute STT immediately since we stopped mid-speech
+        ai.tts._unmute_stt()
         for ws in list(_gesture_ws_clients):
             try:
                 await ws.send_json({"type": "gesture_command", "command": "submit_vosk"})
             except Exception:
                 pass
 
-
-    elif gesture_name == camera_stream.GESTURE_PEACE:
-        # Take a camera capture
-        logger.info("[gesture_action] Capturing image")
-        try:
-            import urllib.request as _ur
-            req = _ur.Request("http://localhost:8000/camera/capture", method="POST")
-            req.add_header("Content-Type", "application/json")
-            _ur.urlopen(req, data=b"{}", timeout=5)
-            ai.tts.speak("Image captured, sir.")
-        except Exception as e:
-            logger.warning("[gesture_action] Capture failed: %s", e)
 
     elif gesture_name == camera_stream.GESTURE_CALL_ME:
         logger.info("[gesture_action] Starting new conversation")

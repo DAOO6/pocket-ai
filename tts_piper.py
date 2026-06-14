@@ -46,6 +46,7 @@ class PocketAudio:
 
         self._queue = queue.Queue()
         self._queue_drained_callback = None
+        self._abort = threading.Event()
         self._stt_engines = []   # STT engines to mute while speaking
         self._worker = threading.Thread(target=self._queue_worker, daemon=True)
         self._worker.start()
@@ -115,6 +116,7 @@ class PocketAudio:
         self._queue_drained_callback = callback
 
     def clear_queue(self):
+        self._abort.set()  # Signal worker to discard next_audio and stop
         try:
             while True:
                 self._queue.get_nowait()
@@ -145,6 +147,14 @@ class PocketAudio:
 
         while True:
             try:
+                # If aborted, discard any pre-synthesised audio and reset
+                if self._abort.is_set():
+                    next_audio = None
+                    next_text = None
+                    self._abort.clear()
+                    self._unmute_stt()
+                    continue
+
                 # Get current sentence (use pre-synthesised if available)
                 if next_audio is not None:
                     current_audio = next_audio
@@ -154,6 +164,10 @@ class PocketAudio:
                 else:
                     text = self._queue.get()
                     if text is None:
+                        continue
+                    # Check abort again after potentially long wait on queue.get()
+                    if self._abort.is_set():
+                        self._abort.clear()
                         continue
                     current_audio = self._synthesise_to_array(text)
                     current_text = text
@@ -166,17 +180,26 @@ class PocketAudio:
                 sd.play(current_audio, samplerate=22050)
 
                 # While playing, pre-synthesise the next sentence if one is queued
-                try:
-                    next_text = self._queue.get_nowait()
-                    if next_text is not None:
-                        next_audio = self._synthesise_to_array(next_text)
-                except queue.Empty:
-                    next_audio = None
-                    next_text = None
+                # But only if not aborted
+                if not self._abort.is_set():
+                    try:
+                        next_text = self._queue.get_nowait()
+                        if next_text is not None:
+                            next_audio = self._synthesise_to_array(next_text)
+                    except queue.Empty:
+                        next_audio = None
+                        next_text = None
 
                 # Wait for playback to finish
                 sd.wait()
                 self._unmute_stt()
+
+                # If aborted during playback, discard pre-synthesised and reset
+                if self._abort.is_set():
+                    next_audio = None
+                    next_text = None
+                    self._abort.clear()
+                    continue
 
                 # Check if queue is now drained
                 if next_audio is None and self._queue.empty() and self._queue_drained_callback:
