@@ -81,7 +81,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
 
             {/* ── Outermost rotating ring with ticks ── */}
             <motion.g
-                style={{ originX: '130px', originY: '130px' }}
+                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                 animate={{ rotate: 360 }}
                 transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}
             >
@@ -100,7 +100,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
 
             {/* ── Second ring (counter-rotating dashes) ── */}
             <motion.g
-                style={{ originX: '130px', originY: '130px' }}
+                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                 animate={{ rotate: -360 }}
                 transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
             >
@@ -120,7 +120,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
 
             {/* ── Segmented middle ring (slowly rotating CW) ── */}
             <motion.g
-                style={{ originX: '130px', originY: '130px' }}
+                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                 animate={{ rotate: 360 }}
                 transition={{ duration: 45, repeat: Infinity, ease: 'linear' }}
             >
@@ -139,7 +139,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
 
             {/* ── Inner ring (fast CCW) ── */}
             <motion.g
-                style={{ originX: '130px', originY: '130px' }}
+                style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                 animate={{ rotate: -360 }}
                 transition={{ duration: 12, repeat: Infinity, ease: 'linear' }}
             >
@@ -158,7 +158,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
             <AnimatePresence>
                 {isActive && (
                     <motion.g
-                        style={{ originX: '130px', originY: '130px' }}
+                        style={{ transformBox: 'fill-box', transformOrigin: 'center' }}
                         animate={{ rotate: 360 }}
                         transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
                         initial={{ opacity: 0 }}
