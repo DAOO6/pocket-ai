@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageCircle, Settings, Hand, Image as GalleryIcon, Code } from 'lucide-react';
+import { MessageCircle, Settings, Hand, Image as GalleryIcon, Code, VolumeX, Volume2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '../contexts/WebSocketContext.jsx';
 import { API_BASE_URL } from '../config.js';
@@ -13,13 +13,13 @@ const GESTURE_LABELS = {
 };
 
 // ─── Arc Reactor SVG Component ───────────────────────────────────────────────
-function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
+function ArcReactor({ voiceStatus, isRecording, isVoskRecording, isMuted }) {
     const isActive   = voiceStatus === 'speaking' || isRecording || isVoskRecording;
     const isListening = isRecording || isVoskRecording;
     const isSpeaking  = voiceStatus === 'speaking';
 
-    const coreColor  = isListening ? '#00ff9f' : isSpeaking ? '#ff6600' : '#00c8ff';
-    const glowColor  = isListening ? 'rgba(0,255,159,0.6)' : isSpeaking ? 'rgba(255,102,0,0.6)' : 'rgba(0,200,255,0.5)';
+    const coreColor  = isMuted ? '#ff2222' : isListening ? '#00ff9f' : isSpeaking ? '#ff6600' : '#00c8ff';
+    const glowColor  = isMuted ? 'rgba(255,34,34,0.6)' : isListening ? 'rgba(0,255,159,0.6)' : isSpeaking ? 'rgba(255,102,0,0.6)' : 'rgba(0,200,255,0.5)';
 
     // Generate tick marks for outer ring
     const ticks = Array.from({ length: 72 }, (_, i) => {
@@ -254,7 +254,7 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording }) {
                 letterSpacing="3"
                 opacity="0.7"
             >
-                {isListening ? 'LISTENING' : isSpeaking ? 'SPEAKING' : 'STANDBY'}
+                {isMuted ? 'MUTED' : isListening ? 'LISTENING' : isSpeaking ? 'SPEAKING' : 'STANDBY'}
             </text>
         </svg>
     );
@@ -308,6 +308,74 @@ export default function Home() {
     const pollTimerRef                         = useRef(null);
     const pressTimer                           = useRef(null);
     const [isHoldMode, setIsHoldMode]         = useState(false);
+    const [isMuted, setIsMuted]               = useState(false);
+    const enterHoldTimer                       = useRef(null);
+    const isEnterHeld                          = useRef(false);
+
+    const toggleMute = useCallback(async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/tts/mute`, { method: 'POST' });
+            const data = await res.json();
+            setIsMuted(data.muted);
+        } catch (e) { console.error('Mute toggle failed:', e); }
+    }, []);
+
+    // ── Mute state sync on mount + every 2s to catch gesture toggles ─────────
+    useEffect(() => {
+        const syncMute = () => {
+            fetch(`${API_BASE_URL}/tts/mute`)
+                .then(r => r.json())
+                .then(d => setIsMuted(d.muted))
+                .catch(() => {});
+        };
+        syncMute();
+        const interval = setInterval(syncMute, 2000);
+        return () => clearInterval(interval);
+    }, []);
+
+    // ── Stable refs so keydown handler always calls latest fn versions ─────────
+    const toggleVoiceRef = useRef(toggleVoice);
+    const startVoskRef   = useRef(startVosk);
+    const stopVoskRef    = useRef(stopVosk);
+    useEffect(() => { toggleVoiceRef.current = toggleVoice; }, [toggleVoice]);
+    useEffect(() => { startVoskRef.current   = startVosk;   }, [startVosk]);
+    useEffect(() => { stopVoskRef.current    = stopVosk;    }, [stopVosk]);
+
+    // ── Enter key: tap = toggle voice, hold = hold-to-talk ───────────────────
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.code !== 'Enter' || e.repeat) return;
+            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+            e.preventDefault();
+            isEnterHeld.current = false;
+            enterHoldTimer.current = setTimeout(() => {
+                isEnterHeld.current = true;
+                startVoskRef.current();
+            }, 400);
+        };
+        const handleKeyUp = (e) => {
+            if (e.code !== 'Enter') return;
+            if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
+            e.preventDefault();
+            if (enterHoldTimer.current) {
+                clearTimeout(enterHoldTimer.current);
+                enterHoldTimer.current = null;
+            }
+            if (isEnterHeld.current) {
+                stopVoskRef.current();
+                isEnterHeld.current = false;
+            } else {
+                toggleVoiceRef.current();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            if (enterHoldTimer.current) clearTimeout(enterHoldTimer.current);
+        };
+    }, []); // empty deps — listeners registered once, refs keep fns current
 
     // ── Gesture polling ───────────────────────────────────────────────────────
     const startPolling = useCallback(() => {
@@ -452,8 +520,28 @@ export default function Home() {
                     </div>
                 </div>
 
-                {/* Gesture status */}
-                <div style={{ minWidth: 60 }} className="flex justify-end">
+                {/* Mute button + Gesture status */}
+                <div style={{ minWidth: 60 }} className="flex flex-col items-end gap-2">
+                    <motion.button
+                        whileHover={{ scale: 1.08 }}
+                        whileTap={{ scale: 0.94 }}
+                        onClick={toggleMute}
+                        title={isMuted ? 'Unmute Jarvis' : 'Mute Jarvis'}
+                        style={{
+                            color: isMuted ? '#ff2222' : '#00c8ff',
+                            border: `1px solid ${isMuted ? 'rgba(255,34,34,0.6)' : 'rgba(0,200,255,0.4)'}`,
+                            background: isMuted ? 'rgba(255,34,34,0.1)' : 'rgba(0,200,255,0.06)',
+                            clipPath: 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))',
+                            boxShadow: isMuted ? '0 0 12px rgba(255,34,34,0.4)' : '0 0 10px rgba(0,200,255,0.2)',
+                            padding: '0.6rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                        }}
+                    >
+                        {isMuted ? <VolumeX size={20} strokeWidth={1.5} /> : <Volume2 size={20} strokeWidth={1.5} />}
+                    </motion.button>
                     <AnimatePresence>
                         {gestureActive && (
                             <motion.div
@@ -520,6 +608,7 @@ export default function Home() {
                         voiceStatus={voiceStatus}
                         isRecording={isRecording}
                         isVoskRecording={isVoskRecording}
+                        isMuted={isMuted}
                     />
                 </div>
 
