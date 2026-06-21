@@ -8,6 +8,7 @@ import sys
 import numpy as np
 
 from piper.voice import PiperVoice
+from piper.voice import SynthesisConfig
 
 os.environ['ORT_LOGGING_LEVEL'] = '3'
 
@@ -139,7 +140,7 @@ class PocketAudio:
     def _synthesise_to_array(self, text):
         """Synthesise text to a numpy audio array without playing it."""
         audio_chunks = []
-        for chunk in self.voice.synthesize(text, length_scale=0.82):
+        for chunk in self.voice.synthesize(text, SynthesisConfig(length_scale=0.82)):
             audio_chunks.append(chunk.audio_int16_bytes)
         if not audio_chunks:
             return None
@@ -257,7 +258,7 @@ class PocketAudio:
 
             # Collect all int16 audio chunks from Piper
             audio_chunks = []
-            for chunk in self.voice.synthesize(text, length_scale=0.82):
+            for chunk in self.voice.synthesize(text, SynthesisConfig(length_scale=0.82)):
                 audio_chunks.append(chunk.audio_int16_bytes)
 
             tts_ms = (time.perf_counter() - t0) * 1000
@@ -292,7 +293,7 @@ class PocketAudio:
         args = shlex.split(command)
         try:
             with subprocess.Popen(args, stdin=subprocess.PIPE) as play_process:
-                for chunk in self.voice.synthesize(text, length_scale=0.82):
+                for chunk in self.voice.synthesize(text, SynthesisConfig(length_scale=0.82)):
                     play_process.stdin.write(chunk.audio_int16_bytes)
                 tts_ms = (time.perf_counter() - t0) * 1000
                 print(f"  text-to-speech: {tts_ms:.0f} ms")
