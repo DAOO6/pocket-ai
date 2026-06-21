@@ -48,6 +48,7 @@ class PocketAudio:
         self._queue_drained_callback = None
         self._abort = threading.Event()
         self._stt_engines = []   # STT engines to mute while speaking
+        self.muted = False       # Global mute — silences TTS output entirely
         self._worker = threading.Thread(target=self._queue_worker, daemon=True)
         self._worker.start()
 
@@ -123,10 +124,22 @@ class PocketAudio:
         except queue.Empty:
             pass
 
+    def set_muted(self, muted: bool):
+        """Mute or unmute TTS. When muting, immediately stops all playback."""
+        self.muted = muted
+        if muted:
+            self.clear_queue()
+            try:
+                import sounddevice as sd
+                sd.stop()
+            except Exception:
+                pass
+            self._unmute_stt()
+
     def _synthesise_to_array(self, text):
         """Synthesise text to a numpy audio array without playing it."""
         audio_chunks = []
-        for chunk in self.voice.synthesize(text):
+        for chunk in self.voice.synthesize(text, length_scale=0.82):
             audio_chunks.append(chunk.audio_int16_bytes)
         if not audio_chunks:
             return None
@@ -215,6 +228,8 @@ class PocketAudio:
         return re.sub(r'[^a-zA-Z0-9\s.,!?;:\'\"()-]', '', text)
 
     def enqueue_sentence(self, sentence):
+        if self.muted:
+            return  # Drop sentence silently when muted
         cleaned = self.clean_text(sentence)
         if cleaned.strip():
             self._queue.put(cleaned)
@@ -242,7 +257,7 @@ class PocketAudio:
 
             # Collect all int16 audio chunks from Piper
             audio_chunks = []
-            for chunk in self.voice.synthesize(text):
+            for chunk in self.voice.synthesize(text, length_scale=0.82):
                 audio_chunks.append(chunk.audio_int16_bytes)
 
             tts_ms = (time.perf_counter() - t0) * 1000
@@ -277,7 +292,7 @@ class PocketAudio:
         args = shlex.split(command)
         try:
             with subprocess.Popen(args, stdin=subprocess.PIPE) as play_process:
-                for chunk in self.voice.synthesize(text):
+                for chunk in self.voice.synthesize(text, length_scale=0.82):
                     play_process.stdin.write(chunk.audio_int16_bytes)
                 tts_ms = (time.perf_counter() - t0) * 1000
                 print(f"  text-to-speech: {tts_ms:.0f} ms")

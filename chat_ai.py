@@ -170,10 +170,14 @@ class AIState:
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
                 "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
-                "4. Occasionally use dry, understated wit when appropriate. "
+                "4. Use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
                 "6. No bullet points. No markdown. Speak naturally. "
-                "Example: 'Certainly, sir. The weather in London is overcast, 12 degrees. Hardly surprising.'"
+                "7. If the user suggests something dangerous, inadvisable, or plainly foolish, say so immediately and plainly in one sentence, then move on. Do not lecture or repeat the warning. "
+                "8. Never be preachy or moralistic. State the facts, give your honest assessment once, and leave it at that. "
+                "Example responses: 'Certainly, sir. The weather in London is overcast, 12 degrees. Hardly surprising.' "
+                "'The odds of surviving that are slim to none, sir. I'd advise against it.' "
+                "'Done, sir.'"
             )}
         ]
 
@@ -210,10 +214,14 @@ class AIState:
                 "1. Always address the user as 'sir'. Every single response must include 'sir'. "
                 "2. Be concise and brief. Maximum 2-3 sentences unless detail is explicitly asked for. "
                 "3. Be calm, precise, and direct. No filler words or unnecessary explanation. "
-                "4. Occasionally use dry, understated wit when appropriate. "
+                "4. Use dry, understated wit when appropriate. "
                 "5. Never break character. You are Jarvis, not a generic AI. "
                 "6. No bullet points. No markdown. Speak naturally. "
-                "Example: 'Certainly, sir. The weather in London is overcast, 12 degrees. Hardly surprising.'"
+                "7. If the user suggests something dangerous, inadvisable, or plainly foolish, say so immediately and plainly in one sentence, then move on. Do not lecture or repeat the warning. "
+                "8. Never be preachy or moralistic. State the facts, give your honest assessment once, and leave it at that. "
+                "Example responses: 'Certainly, sir. The weather in London is overcast, 12 degrees. Hardly surprising.' "
+                "'The odds of surviving that are slim to none, sir. I'd advise against it.' "
+                "'Done, sir.'"
             )})
 
         payload = json.dumps({
@@ -452,17 +460,13 @@ async def _dispatch_gesture(gesture_name: str):
                 pass
 
     elif gesture_name == camera_stream.GESTURE_CALL_ME:
-        # Call me: skip/abort current TTS output
-        logger.info("[gesture_action] Skipping TTS output")
-        ai.tts.clear_queue()
-        try:
-            import sounddevice as sd
-            sd.stop()
-        except Exception:
-            pass
+        # Call me: toggle mute on/off
+        new_mute_state = not ai.tts.muted
+        logger.info("[gesture_action] Toggling mute: %s", new_mute_state)
+        ai.tts.set_muted(new_mute_state)
         for ws in list(_gesture_ws_clients):
             try:
-                await ws.send_json({"type": "gesture_command", "command": "abort"})
+                await ws.send_json({"type": "mute_state", "muted": new_mute_state})
             except Exception:
                 pass
 
@@ -495,6 +499,24 @@ def _preload_greeting(tts: PocketAudio):
             setattr(ai, attr, None)
             logger.warning("Could not preload '%s': %s", phrase, e)
 
+
+@router.post("/tts/mute")
+async def toggle_mute():
+    """Toggle TTS mute state. Returns new state."""
+    new_state = not ai.tts.muted
+    ai.tts.set_muted(new_state)
+    # Notify all connected voice clients of the new mute state
+    for ws in list(_gesture_ws_clients):
+        try:
+            await ws.send_json({"type": "mute_state", "muted": new_state})
+        except Exception:
+            pass
+    return {"muted": new_state}
+
+@router.get("/tts/mute")
+async def get_mute_state():
+    """Get current TTS mute state."""
+    return {"muted": ai.tts.muted}
 
 @router.get("/conversations")
 async def list_conversations():
