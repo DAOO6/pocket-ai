@@ -266,7 +266,7 @@ function HudButton({ icon: Icon, label, onClick, color = '#00c8ff', active = fal
         <motion.button
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.96 }}
-            onClick={onClick}
+            onClick={(e) => { onClick(e); e.currentTarget.blur(); }}
             className="pixel-btn flex flex-col items-center justify-center gap-2 w-full h-full"
             style={{
                 borderColor: active ? color : color + '88',
@@ -481,7 +481,7 @@ export default function Home() {
                 <motion.button
                     whileHover={{ scale: 1.08 }}
                     whileTap={{ scale: 0.94 }}
-                    onClick={() => navigate('/settings')}
+                    onClick={(e) => { navigate('/settings'); e.currentTarget.blur(); }}
                     className="p-3 flex items-center justify-center"
                     style={{
                         color: '#00c8ff',
@@ -525,7 +525,7 @@ export default function Home() {
                     <motion.button
                         whileHover={{ scale: 1.08 }}
                         whileTap={{ scale: 0.94 }}
-                        onClick={toggleMute}
+                        onClick={(e) => { toggleMute(); e.currentTarget.blur(); }}
                         title={isMuted ? 'Unmute Jarvis' : 'Mute Jarvis'}
                         style={{
                             color: isMuted ? '#ff2222' : '#00c8ff',

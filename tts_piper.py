@@ -126,16 +126,16 @@ class PocketAudio:
             pass
 
     def set_muted(self, muted: bool):
-        """Mute or unmute TTS. When muting, immediately stops all playback."""
+        """Mute or unmute TTS by setting output volume to 0/1.
+        Does NOT interrupt playback or touch the queue — avoids the skip-first-line bug."""
         self.muted = muted
-        if muted:
-            self.clear_queue()
-            try:
-                import sounddevice as sd
-                sd.stop()
-            except Exception:
-                pass
-            self._unmute_stt()
+        try:
+            import sounddevice as sd
+            sd.default.latency = 'high'  # no-op but ensures sd is initialised
+            # sounddevice doesn't have a global volume, so we set via stream
+            # Instead we track muted and apply gain in the worker
+        except Exception:
+            pass
 
     def _synthesise_to_array(self, text):
         """Synthesise text to a numpy audio array without playing it."""
@@ -189,9 +189,10 @@ class PocketAudio:
                 if current_audio is None:
                     continue
 
-                # Start playback
+                # Start playback — apply zero gain if muted
                 self._mute_stt()
-                sd.play(current_audio, samplerate=22050)
+                playback_audio = np.zeros_like(current_audio) if self.muted else current_audio
+                sd.play(playback_audio, samplerate=22050)
 
                 # While playing, pre-synthesise the next sentence if one is queued
                 # But only if not aborted
@@ -229,8 +230,6 @@ class PocketAudio:
         return re.sub(r'[^a-zA-Z0-9\s.,!?;:\'\"()-]', '', text)
 
     def enqueue_sentence(self, sentence):
-        if self.muted:
-            return  # Drop sentence silently when muted
         cleaned = self.clean_text(sentence)
         if cleaned.strip():
             self._queue.put(cleaned)
