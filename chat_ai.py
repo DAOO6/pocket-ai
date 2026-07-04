@@ -473,8 +473,7 @@ async def _dispatch_gesture(gesture_name: str):
     logger.info("[gesture_action] Dispatching: %s", gesture_name)
 
     if gesture_name == camera_stream.GESTURE_OPEN_PALM:
-        # Open palm: clear TTS and play greeting
-        ai.tts.clear_queue()
+        # Open palm: play greeting only — no queue manipulation
         _play_gesture_audio(ai, "_greeting_audio_array", "Good day, sir.")
 
     elif gesture_name == camera_stream.GESTURE_THUMBS_UP:

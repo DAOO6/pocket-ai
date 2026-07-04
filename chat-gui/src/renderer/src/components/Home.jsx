@@ -260,6 +260,140 @@ function ArcReactor({ voiceStatus, isRecording, isVoskRecording, isMuted }) {
     );
 }
 
+
+// ─── Camera HUD Panel ────────────────────────────────────────────────────────
+function CameraPanel({ apiBase, currentGesture }) {
+    const gestureInfo = currentGesture ? GESTURE_LABELS[currentGesture] : null;
+
+    const GESTURE_GUIDE = [
+        { emoji: '✋', label: 'CLEAR',  color: '#00c8ff' },
+        { emoji: '👍', label: 'LISTEN', color: '#00ff9f' },
+        { emoji: '✌️', label: 'SUBMIT', color: '#ffdd00' },
+        { emoji: '🤙', label: 'SKIP',   color: '#cc88ff' },
+    ];
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, x: 60 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 60 }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+            style={{
+                width: 260,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                flexShrink: 0,
+            }}
+        >
+            {/* Header label */}
+            <div style={{
+                fontFamily: 'Orbitron, sans-serif',
+                fontSize: '0.5rem',
+                letterSpacing: '0.2em',
+                color: '#00c8ff',
+                opacity: 0.7,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+            }}>
+                <span className="animate-status-blink" style={{ width: 4, height: 4, borderRadius: '50%', background: '#00c8ff', display: 'inline-block' }} />
+                GESTURE CAM
+            </div>
+
+            {/* Camera feed */}
+            <div style={{
+                position: 'relative',
+                border: '1px solid rgba(0,200,255,0.5)',
+                background: '#000',
+                clipPath: 'polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px))',
+                boxShadow: '0 0 16px rgba(0,200,255,0.2)',
+                overflow: 'hidden',
+                aspectRatio: '4/3',
+            }}>
+                <img
+                    src={`${apiBase}/video_feed`}
+                    alt="Gesture Camera"
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                />
+
+                {/* Scan-line overlay */}
+                <div style={{
+                    position: 'absolute', inset: 0, pointerEvents: 'none',
+                    background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px)',
+                }} />
+
+                {/* Cyan glow border inset */}
+                <div style={{
+                    position: 'absolute', inset: 0, pointerEvents: 'none',
+                    boxShadow: 'inset 0 0 20px rgba(0,200,255,0.1)',
+                }} />
+
+                {/* Corner brackets */}
+                {[
+                    { top: 6, left: 6, borderWidth: '1px 0 0 1px' },
+                    { top: 6, right: 6, borderWidth: '1px 1px 0 0' },
+                    { bottom: 6, left: 6, borderWidth: '0 0 1px 1px' },
+                    { bottom: 6, right: 6, borderWidth: '0 1px 1px 0' },
+                ].map((s, i) => (
+                    <div key={i} style={{
+                        position: 'absolute', width: 12, height: 12,
+                        borderStyle: 'solid', borderColor: '#00c8ff', opacity: 0.8,
+                        ...s,
+                    }} />
+                ))}
+
+                {/* Active gesture label overlay */}
+                <AnimatePresence>
+                    {gestureInfo && (
+                        <motion.div
+                            key={currentGesture}
+                            initial={{ opacity: 0, y: -6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            style={{
+                                position: 'absolute', top: 8, left: '50%',
+                                transform: 'translateX(-50%)',
+                                fontFamily: 'Orbitron, sans-serif',
+                                fontSize: '0.45rem',
+                                letterSpacing: '0.15em',
+                                padding: '2px 8px',
+                                border: `1px solid ${gestureInfo.color}`,
+                                color: gestureInfo.color,
+                                background: `${gestureInfo.color}22`,
+                                boxShadow: `0 0 10px ${gestureInfo.color}55`,
+                                whiteSpace: 'nowrap',
+                            }}
+                        >
+                            {gestureInfo.label}
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </div>
+
+            {/* Gesture guide */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: 4,
+            }}>
+                {GESTURE_GUIDE.map(({ emoji, label, color }) => (
+                    <div key={label} style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                        padding: '4px 2px',
+                        border: `1px solid ${color}44`,
+                        background: `${color}08`,
+                        clipPath: 'polygon(0 0, calc(100% - 4px) 0, 100% 4px, 100% 100%, 4px 100%, 0 calc(100% - 4px))',
+                    }}>
+                        <span style={{ fontSize: '0.9rem', lineHeight: 1 }}>{emoji}</span>
+                        <span style={{ fontFamily: 'Orbitron', fontSize: '0.35rem', letterSpacing: '0.05em', color, opacity: 0.9 }}>{label}</span>
+                    </div>
+                ))}
+            </div>
+        </motion.div>
+    );
+}
+
 // ─── HUD Menu Button ─────────────────────────────────────────────────────────
 function HudButton({ icon: Icon, label, onClick, color = '#00c8ff', active = false }) {
     return (
@@ -452,9 +586,17 @@ export default function Home() {
 
     return (
         <div
-            className="relative w-full h-full overflow-hidden flex flex-col items-center justify-between p-4"
+            className="relative w-full h-full overflow-hidden flex flex-row items-stretch p-4 gap-4"
             style={{ background: 'radial-gradient(ellipse at center, #051020 0%, #020b18 70%)' }}
         >
+            {/* ── Diagonal accent lines — full screen absolute ── */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.15, zIndex: 1 }}>
+                <line x1="0" y1="0" x2="40%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
+                <line x1="100%" y1="0" x2="60%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
+                <line x1="0" y1="30%" x2="15%" y2="0" stroke="#00c8ff" strokeWidth="0.5" />
+                <line x1="100%" y1="70%" x2="85%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
+            </svg>
+
             {/* ── Background grid ── */}
             <div
                 className="absolute inset-0 pointer-events-none"
@@ -466,14 +608,12 @@ export default function Home() {
                     backgroundSize: '48px 48px',
                 }}
             />
-
-            {/* ── Diagonal accent lines (top-left & bottom-right) ── */}
-            <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ opacity: 0.15 }}>
-                <line x1="0" y1="0" x2="40%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
-                <line x1="100%" y1="0" x2="60%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
-                <line x1="0" y1="30%" x2="15%" y2="0" stroke="#00c8ff" strokeWidth="0.5" />
-                <line x1="100%" y1="70%" x2="85%" y2="100%" stroke="#00c8ff" strokeWidth="0.5" />
-            </svg>
+            {/* Main content column — slides left to make room for camera */}
+            <motion.div
+                layout
+                transition={{ duration: 0.4, ease: 'easeInOut' }}
+                style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'space-between', minWidth: 0 }}
+            >
 
             {/* ── TOP BAR ── */}
             <div className="relative z-30 w-full flex items-center justify-between">
@@ -708,6 +848,16 @@ export default function Home() {
                 <span>MK VII</span>
                 <span>PWR::ARC REACTOR</span>
             </div>
+            </motion.div>
+
+            {/* ── Camera panel — slides in from right when gesture active ── */}
+            <AnimatePresence>
+                {gestureActive && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20 }}>
+                        <CameraPanel apiBase={API_BASE_URL} currentGesture={currentGesture} />
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
