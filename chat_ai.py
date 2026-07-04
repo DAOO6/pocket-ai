@@ -25,6 +25,10 @@ from tts_piper import PocketAudio, split_sentences
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.2:3b")
 
+# If a spoken response exceeds this many words, Jarvis speaks a short summary
+# instead of the full text (the full text is still shown in the chat bubble).
+TTS_MAX_WORDS = 60
+
 logger = logging.getLogger(__name__)
 
 
@@ -268,6 +272,47 @@ class AIState:
         chunks = await loop.run_in_executor(None, _stream_ollama)
         return iter(chunks)
 
+    async def summarise_for_speech(self, full_text: str) -> str:
+        """
+        Generate a short (1-2 sentence) spoken summary of a long response.
+        Used when full_text exceeds TTS_MAX_WORDS — keeps Jarvis's spoken
+        replies brief while the full text remains visible in the chat bubble.
+        """
+        loop = asyncio.get_event_loop()
+        summary_messages = [
+            {"role": "system", "content": (
+                "You summarise text into exactly one or two short spoken sentences, "
+                "in Jarvis's voice (calm, precise, addresses the user as 'sir'). "
+                "No markdown, no lists, no preamble like 'Here is a summary'. "
+                "Just the spoken summary itself."
+            )},
+            {"role": "user", "content": f"Summarise this for speech:\n\n{full_text}"},
+        ]
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "messages": summary_messages,
+            "stream": False,
+            "options": {"temperature": 0.4, "num_predict": 80},
+        }).encode("utf-8")
+
+        def _call():
+            try:
+                req = urllib.request.Request(
+                    f"{OLLAMA_BASE_URL}/api/chat",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+                return data.get("message", {}).get("content", "").strip()
+            except Exception as e:
+                logger.warning("[summarise_for_speech] failed: %s", e)
+                return ""
+
+        summary = await loop.run_in_executor(None, _call)
+        return summary
+
     async def ai_response_and_speak(self, websocket: WebSocket, text: str, abort_event: asyncio.Event, message_queue: asyncio.Queue):
         """
         Takes text, routes via semantic router, then either runs tool_ai (function_gemma)
@@ -297,14 +342,15 @@ class AIState:
                 tool_call_raw, tool_result = await loop.run_in_executor(
                     None, _run_tool_ai_subprocess, text
                 )
-                if tool_call_raw or tool_result is not None:
-                    display_text = str(tool_result) if tool_result else "No tool call produced."
+                if tool_result:
+                    display_text = str(tool_result)
                     if tool_call_raw:
                         self.voice_messages.append({"role": "assistant", "content": tool_call_raw, "hidden": True})
-                    if tool_result is not None:
-                        self.voice_messages.append({"role": "assistant", "content": display_text})
+                    self.voice_messages.append({"role": "assistant", "content": display_text})
                 else:
-                    display_text = "No tool call produced."
+                    # No tool matched, or the tool produced no usable result —
+                    # never speak raw model output. Give a clean in-character reply.
+                    display_text = "I don't have a function for that one, sir. I can help with weather, web search, stock prices, or a network scan."
                     self.voice_messages.append({"role": "assistant", "content": display_text})
                 if not abort_event.is_set():
                     if len(self.voice_messages) > 11:
@@ -318,12 +364,11 @@ class AIState:
                     else:
                         await websocket.send_json({"type": "voice_status", "status": "idle"})
                 return
-            # Qwen path: stream response and feed TTS sentence-by-sentence
+            # Qwen path: stream text to the chat bubble live, but hold back TTS
+            # until the full response is in — lets us check length and speak a
+            # summary instead of the whole thing if it's too long.
             thinking = route == "qwen_thinking"
             response = await self.generate_response(self.voice_messages, thinking=thinking)
-
-            tts_flushed_len = 0  # index in clean_reply up to which we've flushed to TTS
-            speaking_status_sent = False
 
             for chunk in response:
                 # Check for abort messages in queue
@@ -347,21 +392,6 @@ class AIState:
                         full_response += content
                         await websocket.send_json({"type": "ai_delta", "text": strip_think_for_ui(full_response)})
 
-                        # Flush complete sentences to TTS (only non-thinking content; strip unclosed <think> too)
-                        clean_reply = strip_think_for_ui(full_response)
-                        last_end = max(
-                            clean_reply.rfind("."), clean_reply.rfind("!"),
-                            clean_reply.rfind("?"), clean_reply.rfind("\n")
-                        )
-                        if last_end >= tts_flushed_len:
-                            to_flush = clean_reply[tts_flushed_len : last_end + 1].strip()
-                            tts_flushed_len = last_end + 1
-                            for s in split_sentences(to_flush):
-                                if not speaking_status_sent:
-                                    speaking_status_sent = True
-                                    await websocket.send_json({"type": "voice_status", "status": "speaking"})
-                                self.tts.enqueue_sentence(s)
-
                 await asyncio.sleep(0.01)
 
             if not abort_event.is_set():
@@ -371,18 +401,25 @@ class AIState:
                     self.voice_messages = [self.voice_messages[0]] + self.voice_messages[-10:]
 
                 clean_reply = strip_think_for_ui(full_response)
-                await websocket.send_json({"type": "ai_final", "text": strip_think_for_ui(full_response)})
+                await websocket.send_json({"type": "ai_final", "text": clean_reply})
 
-                # Flush any remaining text to TTS (last sentence or fragment)
-                if clean_reply and tts_flushed_len < len(clean_reply):
-                    remainder = clean_reply[tts_flushed_len:].strip()
-                    if remainder:
-                        if not speaking_status_sent:
-                            await websocket.send_json({"type": "voice_status", "status": "speaking"})
-                        self.tts.enqueue_sentence(remainder)
-                if not speaking_status_sent:
+                if clean_reply:
+                    word_count = len(clean_reply.split())
+                    if word_count > TTS_MAX_WORDS:
+                        logger.info("[tts] Response is %d words (> %d) — speaking summary instead.", word_count, TTS_MAX_WORDS)
+                        to_speak = await self.summarise_for_speech(clean_reply)
+                        if not to_speak:
+                            # Summary call failed — fall back to a short generic line
+                            # rather than speaking the full long response.
+                            to_speak = "I've got a longer answer for you, sir — take a look at the screen."
+                    else:
+                        to_speak = clean_reply
+
+                    await websocket.send_json({"type": "voice_status", "status": "speaking"})
+                    self.tts.enqueue_text(to_speak)
+                else:
                     await websocket.send_json({"type": "voice_status", "status": "idle"})
-                # Otherwise "idle" is sent by on_tts_queue_drained when playback finishes
+                # "idle" is sent by on_tts_queue_drained when playback finishes
 
         except Exception as e:
             logger.exception("Error in AI response pipeline: %s", e)
@@ -611,7 +648,10 @@ async def chat_websocket_endpoint(websocket: WebSocket, conv_id: str):
                         tool_call_raw, tool_result = await loop.run_in_executor(
                             None, _run_tool_ai_subprocess, user_text
                         )
-                        display_reply = str(tool_result) if tool_result is not None else "No tool call produced."
+                        display_reply = str(tool_result) if tool_result else (
+                            "I don't have a function for that one, sir. "
+                            "I can help with weather, web search, stock prices, or a network scan."
+                        )
                         if not abort_event.is_set():
                             await websocket.send_json({"type": "stream_delta", "text": display_reply})
                             await websocket.send_json({"type": "stream_final", "text": display_reply})

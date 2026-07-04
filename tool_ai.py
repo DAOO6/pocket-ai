@@ -27,6 +27,17 @@ IS_WINDOWS = sys.platform == "win32"
 _URL_OPENER = urllib.request.build_opener()
 _URL_OPENER.addheaders = [("User-Agent", "PocketAI/1.0")]
 
+# Build an SSL context backed by certifi's CA bundle.
+# Fixes "SSL: UNEXPECTED_EOF_WHILE_READING" / certificate verify failures on
+# Windows, where Python sometimes can't find the system certificate store.
+try:
+    import ssl
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = None
+    logger.warning("[tool_ai] certifi not installed — SSL requests may fail on Windows. Run: pip install certifi")
+
 from config import LOCAL_DIR, TOOLS_PATH, TOOL_REPO_ID, TOOL_FILENAME, TOOL_MODEL_PATH
 
 REPO_ID = TOOL_REPO_ID
@@ -176,6 +187,9 @@ def _extract_json_object(text: str) -> str:
 
 def _http_get(url: str, timeout: float = 10.0) -> str:
     req = urllib.request.Request(url)
+    if _SSL_CONTEXT is not None:
+        with _URL_OPENER.open(req, timeout=timeout, context=_SSL_CONTEXT) as resp:
+            return resp.read().decode("utf-8", errors="replace")
     with _URL_OPENER.open(req, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
@@ -405,7 +419,9 @@ def run_tool(name: str, arguments: dict) -> str:
     runner = TOOL_RUNNERS.get(name)
     if not runner:
         logger.warning("[tool] unknown tool: %s(%s)", name, arguments)
-        return f"Unknown tool: {name}"
+        # Don't speak the literal "Unknown tool: x" — return None so the
+        # caller falls back to a clean in-character message instead.
+        return None
     return runner(arguments)
 
 
